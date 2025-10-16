@@ -189,9 +189,6 @@
         ...overrides,
       });
       const [rows, setRows] = useState([createRow()]);
-      const [loadingQuotes, setLoadingQuotes] = useState(false);
-      const [fetchError, setFetchError] = useState(null);
-      const [refreshToken, setRefreshToken] = useState(0);
       const addRow = () => setRows(r => ([...r, createRow()]));
       const clearRows = () => {
         setRows([createRow()]);
