@@ -48,6 +48,11 @@
       link: "#38bdf8",
     };
 
+    const MARKETS = {
+      US: { label: "EE.UU.", currency: "USD" },
+      AR: { label: "Argentina", currency: "ARS" },
+    };
+
     const defaultTickers = ["AAPL", "TSLA", "NVDA", "MSFT"];
     const emptyRow = (ticker = "") => ({
       id: uid(),
@@ -179,6 +184,9 @@
         ...overrides,
       });
       const [rows, setRows] = useState([createRow()]);
+      const [loadingQuotes, setLoadingQuotes] = useState(false);
+      const [fetchError, setFetchError] = useState(null);
+      const [refreshToken, setRefreshToken] = useState(0);
       const addRow = () => setRows(r => ([...r, createRow()]));
       const clearRows = () => {
         setRows([createRow()]);
