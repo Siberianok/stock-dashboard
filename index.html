@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Selector de Acciones – Parabólicas (Standalone)</title>
+    <!-- Tailwind Play CDN (dev/prototipado) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- React 18 UMD -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel Standalone para compilar JSX en el navegador (prototipo) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Recharts UMD -->
+    <script src="https://unpkg.com/recharts@2.10.4/umd/Recharts.min.js"></script>
+  </head>
+  <body class="min-h-screen bg-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useMemo, useState } = React;
+      const { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Sankey } = Recharts;
+
+      // ---------------- Iconos inline (SVG simples) ----------------
+      const IconWrap = ({children}) => (
+        <div className="p-3 rounded-2xl bg-white/10 flex items-center justify-center">{children}</div>
+      );
+      const IconBar = ({ size=44, strokeWidth=1.75, className="text-sky-300" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+          <path d="M3 3v18h18"/>
+          <rect x="7" y="13" width="3" height="5" rx="1"/>
+          <rect x="12" y="9" width="3" height="9" rx="1"/>
+          <rect x="17" y="5" width="3" height="13" rx="1"/>
+        </svg>
+      );
+      const IconGauge = ({ size=44, strokeWidth=1.75, className="text-emerald-300" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+          <path d="M12 15l3.5-3.5" />
+          <path d="M20.3 18c.4-1 .7-2.2.7-3.4C21 9.8 17 6 12 6s-9 3.8-9 8.6c0 1.2.3 2.4.7 3.4" />
+        </svg>
+      );
+      const IconActivity = ({ size=44, strokeWidth=1.75, className="text-amber-300" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+      );
+      const IconTrendingUp = ({ size=44, strokeWidth=1.75, className="text-fuchsia-300" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+          <polyline points="23 6 13.5 15.5 9.5 11.5 2 19" />
+          <polyline points="17 6 23 6 23 12" />
+        </svg>
+      );
+
+      // -------------------------------- Utilidades --------------------------------
+      const fmt = (n, d = 2) => (typeof n === "number" && isFinite(n) ? n.toFixed(d) : "");
+      const toNum = (v) => {
+        if (v === "" || v === undefined || v === null) return undefined;
+        const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+        return isFinite(n) ? n : undefined;
+      };
+      const uid = () => Math.random().toString(36).slice(2, 9);
+
+      // Paleta
+      const COLORS = {
+        baseBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800",
+        glass: "bg-white/10 ring-1 ring-white/15 backdrop-blur",
+        badgeOK: "bg-emerald-100 text-emerald-700",
+        badgeNO: "bg-rose-100 text-rose-700",
+        gradientBar: "bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-500",
+        scoreHi: "#10b981",
+        scoreMid: "#f59e0b",
+        scoreLo: "#ef4444",
+        link: "#38bdf8",
+      };
+
+      const Stat = ({ label, value, sub, icon }) => (
+        <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
+          <IconWrap>{icon}</IconWrap>
+          <div>
+            <div className="text-3xl font-semibold text-white leading-tight">{value}</div>
+            <div className="text-sm text-white/80">{label}</div>
+            {sub ? <div className="text-xs text-white/60 mt-1">{sub}</div> : null}
+          </div>
+        </div>
+      );
+      const Badge = ({ ok, label }) => (
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>{label}</span>
+      );
+      const ScoreBar = ({ value }) => (
+        <div className="w-full bg-white/20 rounded-full h-2">
+          <div className={`h-2 rounded-full transition-all duration-500 ${COLORS.gradientBar}`} style={{ width: `${Math.max(0, Math.min(100, value || 0))}%` }} />
+        </div>
+      );
+
+      function App(){
+        // ----------------------- Umbrales (editables) -----------------------
+        const [th, setTh] = useState({
+          priceMin: 1.5,
+          priceMax: 20,
+          rvolMin: 2,
+          rvolIdeal: 5,
+          atrMin: 0.5,
+          atrPctMin: 3,
+          chgMin: 10,
+          parabolic50: false,
+          needEMA200: true,
+          float50: 50,
+          float10: 10,
+          rotationMin: 1,
+          rotationIdeal: 3,
+          shortMin: 15,
+          spreadMaxPct: 1.0,
+          usdLiquidityMin: 5, // en millones
+        });
+
+        // ---------------------------- Datos (filas) ----------------------------
+        const [rows, setRows] = useState([
+          { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "",
+            shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "",
+            catalyst: false, intradiaOK: false, comments: "" }
+        ]);
+
+        const addRow = () => setRows(r => ([...r, { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "", shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "", catalyst: false, intradiaOK: false, comments: "" }]));
+        const clearRows = () => setRows([{ id: uid(), ticker: "", open: "", close: "" }]);
+        const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
+
+        // Fila seleccionada para el radar
+        const [selectedId, setSelectedId] = useState(null);
+
+        // ----------------------------- Cálculo fila -----------------------------
+        const calc = (r) => {
+          const open = toNum(r.open); const close = toNum(r.close);
+          const volToday = toNum(r.volToday); const volAvg20 = toNum(r.volAvg20);
+          const floatM = toNum(r.floatM); const atr14 = toNum(r.atr14);
+          const ema9 = toNum(r.ema9); const ema200 = toNum(r.ema200);
+          const shortPct = toNum(r.shortPct); const dtc = toNum(r.dtc);
+          const spreadPct = toNum(r.spreadPct); const usdLiquidityM = toNum(r.usdLiquidityM);
+
+          const rvol = (typeof volToday === "number" && typeof volAvg20 === "number" && volAvg20 > 0) ? (volToday / volAvg20) : undefined;
+          const atrPct = (typeof atr14 === "number" && typeof close === "number" && close > 0) ? (atr14 / close) * 100 : undefined;
+          const chgPct = (typeof open === "number" && typeof close === "number" && open > 0) ? ((close - open) / open) * 100 : undefined;
+          const rotation = (typeof volToday === "number" && typeof floatM === "number" && floatM > 0) ? (volToday / (floatM * 1e6)) : undefined;
+
+          const priceOK = typeof close === "number" && close >= th.priceMin && close <= th.priceMax;
+          const emaOK = (typeof close === "number" && typeof ema9 === "number" && close > ema9 && (!th.needEMA200 || (typeof ema200 === "number" && close > ema200)));
+          const rvol2 = typeof rvol === "number" && rvol >= th.rvolMin;
+          const rvol5 = typeof rvol === "number" && rvol >= th.rvolIdeal;
+          const chgOK = typeof chgPct === "number" && chgPct >= (th.parabolic50 ? 50 : th.chgMin);
+          const atrOK = (typeof atr14 === "number" && atr14 >= th.atrMin) || (typeof atrPct === "number" && atrPct >= th.atrPctMin);
+          const float50 = typeof floatM === "number" && floatM < th.float50;
+          const float10 = typeof floatM === "number" && floatM < th.float10;
+          const rot1 = typeof rotation === "number" && rotation >= th.rotationMin;
+          const rot3 = typeof rotation === "number" && rotation >= th.rotationIdeal;
+          const shortOK = typeof shortPct === "number" && shortPct >= th.shortMin;
+          const spreadOK = (typeof spreadPct !== "number") ? true : spreadPct <= th.spreadMaxPct; // si no hay dato, no penaliza
+          const liqOK = (typeof usdLiquidityM !== "number") ? true : usdLiquidityM >= th.usdLiquidityMin;
+
+          let score = 0;
+          score += float10 ? 20 : (float50 ? 10 : 0);
+          score += rvol2 ? 15 : 0;
+          score += rvol5 ? 10 : 0;
+          score += priceOK ? 10 : 0;
+          score += emaOK ? 10 : 0;
+          score += (typeof chgPct === "number" && chgPct >= th.chgMin) ? 10 : 0;
+          score += (typeof chgPct === "number" && chgPct >= 50) ? 10 : 0;
+          score += atrOK ? 10 : 0;
+          score += rot1 ? 5 : 0;
+          score += rot3 ? 5 : 0;
+          score += shortOK ? 5 : 0;
+          score += (r.intradiaOK ? 5 : 0);
+          score += (r.catalyst ? 5 : 0);
+
+          const flags = { priceOK, emaOK, rvol2, rvol5, chgOK, atrOK, float50, float10, rot1, rot3, shortOK, spreadOK, liqOK };
+          return { rvol, atrPct, chgPct, rotation, score, flags };
+        };
+
+        // ---------------------------- Resumen (KPIs) ----------------------------
+        const computed = useMemo(() => rows.map(r => ({ r, ...calc(r) })), [rows, th]);
+        const kpis = useMemo(() => {
+          const scores = computed.map(x => x.score || 0);
+          const top = scores.length ? Math.max(...scores) : 0;
+          const inPlay = computed.filter(x => x.flags && x.flags.rvol2 && x.flags.priceOK && x.flags.emaOK).length;
+          const ready70 = computed.filter(x => (x.score || 0) >= 70).length;
+          return { top, inPlay, ready70, total: rows.length };
+        }, [computed, rows.length]);
+
+        // ------------------------------ Acciones UI ------------------------------
+        const setPresetModerado = () => setTh({ ...th, rvolMin: 2, rvolIdeal: 5, chgMin: 10, parabolic50: false, atrMin: 0.5, atrPctMin: 3, needEMA200: true });
+        const setPresetAgresivo = () => setTh({ ...th, rvolMin: 3, rvolIdeal: 6, chgMin: 20, parabolic50: true, atrMin: 0.6, atrPctMin: 4, needEMA200: true });
+        const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b).score || 0) - (calc(a).score || 0)));
+        const exportCSV = () => {
+          const headers = [
+            "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
+          ];
+          const lines = [headers.join(",")];
+          rows.forEach(r => {
+            const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r);
+            lines.push([
+              r.ticker, r.open, r.close, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.usdLiquidityM, Math.round(score||0),
+              flags.priceOK, flags.emaOK, flags.rvol2, flags.rvol5, flags.chgOK, flags.atrOK, flags.float50, flags.float10, flags.rot1, flags.rot3, flags.shortOK, flags.spreadOK, flags.liqOK
+            ].join(","));
+          });
+          const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = "selector_parabolicas.csv"; a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        // ------------------------------ Tests demo ------------------------------
+        const seedDemo = () => {
+          const a = { id: uid(), ticker: "DEMOA", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
+            shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", usdLiquidityM: "100",
+            catalyst: true, intradiaOK: true, comments: "Caso A: debería puntuar alto" };
+          const b = { id: uid(), ticker: "DEMOB", open: "50", close: "49", volToday: "300000", volAvg20: "500000", floatM: "60",
+            shortPct: "5", dtc: "1", atr14: "0.2", ema9: "49.2", ema200: "60", spreadPct: "1.2", usdLiquidityM: "15",
+            catalyst: false, intradiaOK: false, comments: "Caso B: debería puntuar bajo" };
+          const c = { id: uid(), ticker: "DEMO50", open: "2", close: "3.1", volToday: "600000", volAvg20: "400000", floatM: "9",
+            shortPct: "10", dtc: "1.8", atr14: "0.35", ema9: "2.2", ema200: "1.9", spreadPct: "0.6", usdLiquidityM: "4",
+            catalyst: false, intradiaOK: true, comments: "+55% pero RVOL moderado (prueba modo parabólico)" };
+          const d = { id: uid(), ticker: "DEMOHI", open: "4", close: "6.2", volToday: "12000000", volAvg20: "1500000", floatM: "12",
+            shortPct: "18", dtc: "2.6", atr14: "0.7", ema9: "5.6", ema200: "3.8", spreadPct: "0.25", usdLiquidityM: "200",
+            catalyst: true, intradiaOK: true, comments: "Alto RVOL y rotación, debería quedar >=70" };
+          setRows([a, b, c, d]);
+        };
+
+        // ------------------------------ Datos charts ------------------------------
+        const scoreBuckets = useMemo(() => {
+          const hi = computed.filter(x => (x.score || 0) >= 70).length;
+          const mid = computed.filter(x => (x.score || 0) >= 40 && (x.score || 0) < 70).length;
+          const lo = Math.max(0, (rows.length || 0) - hi - mid);
+          return [
+            { name: ">=70", value: hi, color: COLORS.scoreHi },
+            { name: "40–69", value: mid, color: COLORS.scoreMid },
+            { name: "<40", value: lo, color: COLORS.scoreLo },
+          ];
+        }, [computed, rows.length]);
+
+        // Embudo (Sankey): Universe -> PrecioOK -> EMAOK -> RVOL≥2 -> SCORE>=70
+        const sankeyData = useMemo(() => {
+          const nUniverse = rows.length;
+          const price = computed.filter(x => x.flags.priceOK).map(x => x);
+          const ema = price.filter(x => x.flags.emaOK);
+          const rvol2 = ema.filter(x => x.flags.rvol2);
+          const ready = rvol2.filter(x => (x.score || 0) >= 70);
+
+          return {
+            nodes: [
+              { name: `Universe (${nUniverse})` },
+              { name: `PrecioOK (${price.length})` },
+              { name: `EMAOK (${ema.length})` },
+              { name: `RVOL≥2 (${rvol2.length})` },
+              { name: `SCORE≥70 (${ready.length})` },
+            ],
+            links: [
+              { source: 0, target: 1, value: price.length },
+              { source: 1, target: 2, value: ema.length },
+              { source: 2, target: 3, value: rvol2.length },
+              { source: 3, target: 4, value: ready.length },
+            ],
+          };
+        }, [rows.length, computed]);
+
+        // Radar por ticker seleccionado (normalización simple 0–100)
+        const selectedRow = useMemo(() => rows.find(r => r.id === selectedId) || rows[0], [selectedId, rows]);
+        const selectedCalc = useMemo(() => (selectedRow ? calc(selectedRow) : null), [selectedRow]);
+        const radarData = useMemo(() => {
+          if (!selectedCalc) return [];
+          const r = selectedCalc;
+          const scale = (val, thr) => {
+            if (val === undefined || thr === 0 || thr === undefined) return 0;
+            return Math.max(0, Math.min(100, (val / thr) * 100));
+          };
+          const rvolScore = scale(r.rvol, th.rvolIdeal);
+          const chgScore = scale(r.chgPct, th.parabolic50 ? 50 : th.chgMin);
+          const atrScore = scale(r.atrPct, th.atrPctMin * 2);
+          const rotScore = scale(r.rotation, th.rotationIdeal);
+          const shortScore = scale(toNum(selectedRow?.shortPct), th.shortMin);
+          const scoreScore = Math.max(0, Math.min(100, r.score || 0));
+
+          return [
+            { k: "RVOL", v: rvolScore },
+            { k: "%día", v: chgScore },
+            { k: "ATR%", v: atrScore },
+            { k: "Rot", v: rotScore },
+            { k: "Short%", v: shortScore },
+            { k: "SCORE", v: scoreScore },
+          ];
+        }, [selectedCalc, selectedRow, th]);
+
+        return (
+          <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
+            {/* Header */}
+            <div className="relative overflow-hidden">
+              <div className="absolute inset-0 -z-10 opacity-30 bg-[radial-gradient(1000px_600px_at_10%_-20%,#22d3ee,transparent),radial-gradient(800px_400px_at_90%_-10%,#a78bfa,transparent)]" />
+              <div className="max-w-[1200px] mx-auto px-4 pt-8 pb-4">
+                <div className="flex items-center gap-3">
+                  {/* Logo simple */}
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" className="text-emerald-400">
+                    <path d="M12 2l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-7z" stroke="currentColor" strokeWidth="1.5"/>
+                  </svg>
+                  <div>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Selector de Acciones – Parabólicas</h1>
+                    <p className="text-white/70 text-sm md:text-base">Checklist visual (score 0–100) + gráficos para detectar candidatas momentum/parabólicas.</p>
+                  </div>
+                </div>
+
+                {/* KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+                  <Stat label="Tickers" value={kpis.total} icon={<IconBar/>} />
+                  <Stat label="Máximo" value={Math.round(kpis.top)} icon={<IconGauge/>} />
+                  <Stat label="En juego" value={kpis.inPlay} icon={<IconActivity/>} />
+                  <Stat label="Listas 70+" value={kpis.ready70} icon={<IconTrendingUp/>} />
+                </div>
+
+                {/* Acciones rápidas */}
+                <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+                  <button onClick={setPresetModerado} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Moderado</button>
+                  <button onClick={setPresetAgresivo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Agresivo</button>
+                  <button onClick={sortByScore} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition">Ordenar por SCORE</button>
+                  <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar CSV</button>
+                  <button onClick={seedDemo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Cargar tests demo</button>
+                </div>
+              </div>
+            </div>
+
+            {/* Contenido */}
+            <div className="max-w-[1200px] mx-auto px-4 pb-10">
+              {/* Panel de Umbrales */}
+              <div className="grid md:grid-cols-3 gap-4 mt-6">
+                {/* Precio & Volatilidad */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
+                  <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm text-center">
+                    {/* Fila 1: Rango (col-span-2) */}
+                    <label className="col-span-2 flex flex-col items-center">
+                      <span>Rango de precio (USD)</span>
+                      <div className="flex gap-3 mt-1 justify-center">
+                        <input type="number" step="0.05" value={th.priceMin} onChange={e=>setTh({...th, priceMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white placeholder-white/60 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                        <input type="number" step="0.05" value={th.priceMax} onChange={e=>setTh({...th, priceMax: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white placeholder-white/60 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                      </div>
+                    </label>
+                    {/* Fila 2: ATR USD / ATR % */}
+                    <label className="flex flex-col items-center justify-center">
+                      <span>ATR ≥ (USD)</span>
+                      <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>ATR% ≥</span>
+                      <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    {/* Fila 3: %día (col-span-2) */}
+                    <label className="col-span-2 flex flex-col items-center">
+                      <span>%día ≥</span>
+                      <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    {/* Fila 4: check (col-span-2) */}
+                    <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
+                      <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
+                      <span>Modo parabólico (≥ 50%)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Volumen & Float */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
+                  <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm text-center">
+                    <label className="flex flex-col items-center justify-center">
+                      <span>RVOL ≥</span>
+                      <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>RVOL ideal ≥</span>
+                      <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>Float &lt; (M)</span>
+                      <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>Pref. Float &lt; (M)</span>
+                      <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>Rotación ≥</span>
+                      <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center justify-center">
+                      <span>Rotación ideal ≥</span>
+                      <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Técnico & Micro */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
+                  <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm text-center">
+                    <label className="flex flex-col items-center">
+                      <span>Liquidez USD ≥ (M)</span>
+                      <input type="number" step="0.5" value={th.usdLiquidityMin} onChange={e=>setTh({...th, usdLiquidityMin: Number(e.target.value)})} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="flex flex-col items-center">
+                      <span>Spread ≤ %</span>
+                      <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
+                    </label>
+                    <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
+                      <input type="checkbox" checked={th.needEMA200} onChange={e=>setTh({...th, needEMA200: e.target.checked})}/>
+                      <span>Requerir precio &gt; EMA200</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Charts Row */}
+              <div className="grid md:grid-cols-3 gap-4 mt-6">
+                {/* Donut de Score */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px] relative`}>
+                  <h3 className="font-semibold text-center mb-3">Distribución de SCORE</h3>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Tooltip formatter={(v, n)=>[v, n]} />
+                        <Pie data={scoreBuckets} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
+                          {scoreBuckets.map((e, i) => (
+                            <Cell key={`c-${i}`} fill={e.color} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold">{kpis.total}</div>
+                      <div className="text-xs text-white/70">tickers</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra el total cargado.</div>
+                </div>
+
+                {/* Sankey */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                  <h3 className="font-semibold text-center mb-3">Embudo de filtros</h3>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <Sankey data={sankeyData} nodePadding={24} nodeWidth={12} linkCurvature={0.5} margin={{ left: 10, right: 10, top: 10, bottom: 10 }} />
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-2 text-xs text-white/70 text-center">Flujo: Universe → PrecioOK → EMAOK → RVOL≥2 → SCORE≥70.</div>
+                </div>
+
+                {/* Radar por ticker */}
+                <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                  <h3 className="font-semibold text-center mb-3">Perfil del ticker (Radar)</h3>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={radarData} outerRadius={80}>
+                        <PolarGrid />
+                        <PolarAngleAxis dataKey="k" tick={{ fill: "#e2e8f0", fontSize: 11 }} />
+                        <PolarRadiusAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
+                        <Radar dataKey="v" stroke="#38bdf8" fill="#38bdf8" fillOpacity={0.3} />
+                        <Tooltip formatter={(v, n)=>[fmt(v,0), n]} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para seleccionarlo.</div>
+                </div>
+              </div>
+
+              {/* Tabla */}
+              <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                  <h3 className="font-semibold">Tickers</h3>
+                  <div className="flex gap-2">
+                    <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={addRow}>+ Agregar fila</button>
+                    <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={clearRows}>Limpiar</button>
+                    <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={seedDemo}>Cargar tests demo</button>
+                  </div>
+                </div>
+
+                <div className="overflow-auto max-h:[60vh]">
+                  <table className="min-w-full text-sm table-auto">
+                    <thead>
+                      <tr className="sticky top-0 z-10 bg-slate-900/70 backdrop-blur">
+                        {[
+                          "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","Flags","SCORE","Notas"
+                        ].map((h,i)=> (
+                          <th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => {
+                        const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r);
+                        const selected = r.id === selectedId || (!selectedId && r === rows[0]);
+                        return (
+                          <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
+                            <td className="px-3 py-2">
+                              <input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40" placeholder="TICK"/>
+                            </td>
+                            <td className="px-3 py-2"><input type="number" value={r.open || ""} onChange={e=>update(r.id, "open", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" value={r.close || ""} onChange={e=>update(r.id, "close", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" value={r.volToday || ""} onChange={e=>update(r.id, "volToday", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" value={r.volAvg20 || ""} onChange={e=>update(r.id, "volAvg20", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2 w-20 text-right">{fmt(rvol)}</td>
+                            <td className="px-3 py-2"><input type="number" value={r.floatM || ""} onChange={e=>update(r.id, "floatM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2 w-20 text-right">{fmt(rotation,2)}</td>
+                            <td className="px-3 py-2"><input type="number" value={r.shortPct || ""} onChange={e=>update(r.id, "shortPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" value={r.dtc || ""} onChange={e=>update(r.id, "dtc", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" step="0.01" value={r.atr14 || ""} onChange={e=>update(r.id, "atr14", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2 w-20 text-right">{fmt(atrPct)}</td>
+                            <td className="px-3 py-2"><input type="number" value={r.ema9 || ""} onChange={e=>update(r.id, "ema9", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" value={r.ema200 || ""} onChange={e=>update(r.id, "ema200", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2 w-20 text-right">{fmt(chgPct)}</td>
+                            <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
+                            <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
+                            <td className="px-3 py-2"><input type="number" step="0.01" value={r.spreadPct || ""} onChange={e=>update(r.id, "spreadPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2"><input type="number" step="0.1" value={r.usdLiquidityM || ""} onChange={e=>update(r.id, "usdLiquidityM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40"/></td>
+                            <td className="px-3 py-2 w-[360px]">
+                              <div className="flex flex-wrap gap-1">
+                                <Badge ok={flags.priceOK} label="Precio" />
+                                <Badge ok={flags.emaOK} label=">EMA9/200" />
+                                <Badge ok={flags.rvol2} label="RVOL≥2" />
+                                <Badge ok={flags.rvol5} label="RVOL≥5" />
+                                <Badge ok={flags.chgOK} label="%día" />
+                                <Badge ok={flags.atrOK} label="ATR" />
+                                <Badge ok={flags.float50} label="Float<50" />
+                                <Badge ok={flags.float10} label="Float<10" />
+                                <Badge ok={flags.rot1} label="Rot≥1x" />
+                                <Badge ok={flags.rot3} label="Rot≥3x" />
+                                <Badge ok={flags.shortOK} label="Short%" />
+                                <Badge ok={flags.spreadOK} label="Spread" />
+                                <Badge ok={flags.liqOK} label="USDliq" />
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 w-48">
+                              <div className="flex items-center gap-2">
+                                <span className="w-10 text-right font-semibold">{Math.round(score || 0)}</span>
+                                <div className="flex-1"><ScoreBar value={score || 0} /></div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2"><input value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} className="w-64 border border-white/20 bg-white/10 text-white rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40" placeholder="Notas"/></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-white/70 text-center">
+                <p>Tips: Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100. Charts por Recharts.</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
