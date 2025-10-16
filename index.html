@@ -408,53 +408,28 @@
 
       // Tests demo
       const seedDemo = () => {
-        const pool = ["DEMOA", "DEMOB", "DEMOC", "DEMOD", "DEMOE", "DEMOF", "DEMOG", "DEMOH"];
-        const now = new Date().toISOString();
-        const sample = pool.slice(0, 6).map((ticker, idx) => {
-          const market = idx % 5 === 0 ? "AR" : "US";
-          const base = market === "US" ? 5 + Math.random() * 45 : 500 + Math.random() * 7000;
-          const open = Number((base * (0.95 + Math.random() * 0.05)).toFixed(2));
-          const move = (Math.random() * 0.18) - 0.04;
-          const close = Number((open * (1 + move)).toFixed(2));
-          const bid = Number((close * (0.995 - Math.random() * 0.003)).toFixed(2));
-          const ask = Number((close * (1.002 + Math.random() * 0.004)).toFixed(2));
-          const avgPrice = Number(((open + close) / 2).toFixed(2));
-          const volAvg20 = Math.round(250000 + Math.random() * 8000000);
-          const volToday = Math.round(volAvg20 * (1.2 + Math.random() * 4));
-          const floatM = Number((5 + Math.random() * 80).toFixed(2));
-          const shortPct = Number((Math.random() * 35).toFixed(2));
-          const atr14 = Number((base * (0.02 + Math.random() * 0.08)).toFixed(2));
-          const ema9 = Number((close * (0.96 + Math.random() * 0.08)).toFixed(2));
-          const ema200 = Number((close * (0.9 + Math.random() * 0.2)).toFixed(2));
-          const spreadPct = Number((((ask - bid) / close) * 100).toFixed(2));
-          const liqM = Number(((close * volToday) / 1e6).toFixed(1));
-          const dtc = Math.max(0.3, Number(((shortPct / 100) * floatM * 1e6 / Math.max(volAvg20, 1)).toFixed(2)));
-          return createRow({
-            ticker,
-            market,
-            open,
-            close,
-            bid,
-            ask,
-            avgPrice,
-            volToday,
-            volAvg20,
-            floatM,
-            shortPct,
-            dtc,
-            atr14,
-            ema9,
-            ema200,
-            spreadPct,
-            liqM,
-            catalyst: Math.random() > 0.6,
-            intradiaOK: Math.random() > 0.5,
-            comments: "Demo autogenerado",
-            lastUpdate: now,
-          });
-        });
+        const pool = [
+          { ticker: "AAPL", market: "US" },
+          { ticker: "TSLA", market: "US" },
+          { ticker: "NVDA", market: "US" },
+          { ticker: "AMD", market: "US" },
+          { ticker: "MARA", market: "US" },
+          { ticker: "PLTR", market: "US" },
+          { ticker: "GGAL.BA", market: "AR" },
+          { ticker: "PAMP.BA", market: "AR" },
+          { ticker: "YPFD.BA", market: "AR" },
+          { ticker: "BMA", market: "US" },
+          { ticker: "CEPU", market: "US" },
+          { ticker: "TGS", market: "US" },
+        ];
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        const sample = shuffled.slice(0, 6).map(({ ticker, market }) => createRow({
+          ticker,
+          market,
+        }));
         setRows(sample);
         setSelectedId(sample[0]?.id || null);
+        setRefreshToken(Date.now());
       };
 
       // Datos charts
@@ -576,34 +551,38 @@
               {/* Precio & Volatilidad */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  <div className="col-span-2 space-y-3">
-                    {Object.entries(MARKETS).map(([key, info]) => {
-                      const cfg = th.priceRange?.[key] || {};
-                      return (
-                        <label key={key} className="flex flex-col items-center gap-2">
-                          <span>{info.label} ({info.currency})</span>
-                          <div className="flex gap-3 justify-center">
-                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>ATR ≥ (moneda local)</span>
-                    <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                  {Object.entries(MARKETS).map(([key, info]) => {
+                    const cfg = th.priceRange?.[key] || {};
+                    return (
+                      <div key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-3">
+                        <span className="text-white/80 font-medium">{info.label} ({info.currency})</span>
+                        <div className="grid grid-cols-2 gap-3 w-full">
+                          <label className="flex flex-col items-center gap-1">
+                            <span className="text-[11px] uppercase tracking-wide text-white/60">Mínimo</span>
+                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                          </label>
+                          <label className="flex flex-col items-center gap-1">
+                            <span className="text-[11px] uppercase tracking-wide text-white/60">Máximo</span>
+                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">ATR ≥ (moneda local)</span>
+                    <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>ATR% ≥</span>
-                    <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">ATR% ≥</span>
+                    <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="col-span-2 flex flex-col items-center gap-2">
-                    <span>%día ≥</span>
-                    <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="sm:col-span-2 w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">%día ≥</span>
+                    <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
                     <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
                     <span>Modo parabólico (≥ 50%)</span>
                   </label>
@@ -613,30 +592,30 @@
               {/* Volumen & Float */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>RVOL ≥</span>
-                    <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">RVOL ≥</span>
+                    <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>RVOL ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">RVOL ideal ≥</span>
+                    <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">Float &lt; (M)</span>
+                    <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>Pref. Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">Pref. Float &lt; (M)</span>
+                    <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>Rotación ≥</span>
-                    <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">Rotación ≥</span>
+                    <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center gap-2">
-                    <span>Rotación ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">Rotación ideal ≥</span>
+                    <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
                 </div>
               </div>
@@ -644,20 +623,18 @@
               {/* Técnico & Micro */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  <div className="col-span-2 space-y-3">
-                    {Object.entries(MARKETS).map(([key, info]) => (
-                      <label key={key} className="flex flex-col items-center gap-2">
-                        <span>Liquidez mínima (M, {info.currency})</span>
-                        <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                      </label>
-                    ))}
-                  </div>
-                  <label className="flex flex-col items-center gap-2">
-                    <span>Spread ≤ %</span>
-                    <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                  {Object.entries(MARKETS).map(([key, info]) => (
+                    <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
+                      <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                  ))}
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                    <span className="text-white/80 font-medium">Spread ≤ %</span>
+                    <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                   </label>
-                  <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
                     <input type="checkbox" checked={th.needEMA200} onChange={e=>setTh({...th, needEMA200: e.target.checked})}/>
                     <span>Requerir precio &gt; EMA200</span>
                   </label>
