@@ -23,7 +23,7 @@
   <script type="text/babel"
           data-presets="env,react"
           data-plugins="transform-optional-chaining,transform-nullish-coalescing-operator,transform-object-rest-spread">
-    const { useState, useMemo } = React;
+    const { useState, useMemo, useEffect } = React;
     const chartsAvailable = !!window.Recharts;
     const {
       ResponsiveContainer, Tooltip,
@@ -57,6 +57,28 @@
       scoreHi: "#10b981", scoreMid: "#f59e0b", scoreLo: "#ef4444",
       link: "#38bdf8",
     };
+
+    const defaultTickers = ["AAPL", "TSLA", "NVDA", "MSFT"];
+    const emptyRow = (ticker = "") => ({
+      id: uid(),
+      ticker: ticker.toUpperCase(),
+      open: undefined,
+      close: undefined,
+      volToday: undefined,
+      volAvg20: undefined,
+      floatM: undefined,
+      shortPct: undefined,
+      dtc: undefined,
+      atr14: undefined,
+      ema9: undefined,
+      ema200: undefined,
+      spreadPct: undefined,
+      usdLiquidityM: undefined,
+      catalyst: false,
+      intradiaOK: false,
+      comments: "",
+      lastUpdate: null,
+    });
 
     function ScoreBar({ value }) {
       const v = Math.max(0, Math.min(100, value || 0));
@@ -95,16 +117,126 @@
       });
 
       // ---------- Filas ----------
-      const [rows, setRows] = useState([
-        { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "",
-          shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "",
-          catalyst: false, intradiaOK: false, comments: "" }
-      ]);
-      const addRow = () => setRows(r => ([...r, { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "", shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "", catalyst: false, intradiaOK: false, comments: "" }]));
-      const clearRows = () => setRows([{ id: uid(), ticker: "", open: "", close: "" }]);
-      const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
+      const [rows, setRows] = useState(defaultTickers.map(t => emptyRow(t)));
+      const [loadingQuotes, setLoadingQuotes] = useState(false);
+      const [fetchError, setFetchError] = useState(null);
+      const [refreshToken, setRefreshToken] = useState(0);
+      const addRow = () => {
+        const raw = prompt("Ingresá el ticker (por ej. AAPL)", "");
+        const ticker = (raw || "").trim().toUpperCase();
+        if (!ticker) return;
+        setRows(prev => {
+          if (prev.some(r => r.ticker === ticker)) return prev;
+          return [...prev, emptyRow(ticker)];
+        });
+      };
+      const clearRows = () => setRows([]);
+      const removeRow = (id) => setRows(prev => prev.filter(r => r.id !== id));
 
       const [selectedId, setSelectedId] = useState(null);
+      const tickers = useMemo(() => rows.map(r => r.ticker).filter(Boolean), [rows]);
+      const tickersKey = tickers.join(",");
+
+      useEffect(() => {
+        if (!tickersKey) {
+          setFetchError(null);
+          setLoadingQuotes(false);
+          return;
+        }
+        let active = true;
+        const fetchQuotes = async () => {
+          try {
+            if (!active) return;
+            setLoadingQuotes(true);
+            setFetchError(null);
+            const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickersKey)}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const json = await response.json();
+            const result = (json?.quoteResponse?.result || []).reduce((acc, quote) => {
+              if (quote?.symbol) acc[quote.symbol.toUpperCase()] = quote;
+              return acc;
+            }, {});
+            if (!active) return;
+            setRows(prev => prev.map(row => {
+              const quote = result[row.ticker];
+              if (!quote) return row;
+              const open = toNum(quote.regularMarketOpen);
+              const close = toNum(quote.regularMarketPrice);
+              const volToday = toNum(quote.regularMarketVolume);
+              const volAvg10 = toNum(quote.averageDailyVolume10Day);
+              const volAvg3m = toNum(quote.averageDailyVolume3Month);
+              const floatShares = toNum(quote.floatShares || quote.sharesOutstanding);
+              const shortPct = toNum(quote.shortPercentOfFloat);
+              const sharesShort = toNum(quote.sharesShort);
+              const avgVolForDtc = volAvg10 || volAvg3m;
+              const ask = toNum(quote.ask);
+              const bid = toNum(quote.bid);
+              const atrApprox = (toNum(quote.regularMarketDayHigh) && toNum(quote.regularMarketDayLow))
+                ? (toNum(quote.regularMarketDayHigh) - toNum(quote.regularMarketDayLow))
+                : undefined;
+              const spreadPct = (ask && bid && close)
+                ? ((ask - bid) / close) * 100
+                : undefined;
+              const usdLiquidityM = (close && volToday)
+                ? (close * volToday) / 1e6
+                : undefined;
+              const dtc = (sharesShort && avgVolForDtc)
+                ? (sharesShort / avgVolForDtc)
+                : undefined;
+              return {
+                ...row,
+                open,
+                close,
+                volToday,
+                volAvg20: volAvg10,
+                floatM: floatShares ? floatShares / 1e6 : undefined,
+                shortPct,
+                dtc,
+                atr14: atrApprox,
+                ema9: toNum(quote.fiftyDayAverage),
+                ema200: toNum(quote.twoHundredDayAverage),
+                spreadPct,
+                usdLiquidityM,
+                lastUpdate: new Date().toISOString(),
+              };
+            }));
+          } catch (err) {
+            console.error(err);
+            if (!active) return;
+            setFetchError(err?.message || "Error al actualizar datos");
+          } finally {
+            if (!active) return;
+            setLoadingQuotes(false);
+          }
+        };
+        fetchQuotes();
+        const interval = setInterval(fetchQuotes, 30000);
+        return () => {
+          active = false;
+          clearInterval(interval);
+        };
+      }, [tickersKey, refreshToken]);
+
+      const refreshQuotes = () => setRefreshToken(Date.now());
+
+      const safeFmt = (value, digits = 2) => {
+        const out = fmt(toNum(value), digits);
+        return out === "" ? "—" : out;
+      };
+      const safePct = (value, digits = 2) => {
+        const out = fmt(toNum(value), digits);
+        return out === "" ? "—" : `${out}%`;
+      };
+      const lastUpdated = useMemo(() => {
+        const stamps = rows.map(r => r.lastUpdate).filter(Boolean);
+        if (!stamps.length) return null;
+        return stamps.reduce((max, cur) => (cur > max ? cur : max), stamps[0]);
+      }, [rows]);
+      const lastUpdatedLabel = useMemo(() => {
+        if (!lastUpdated) return "Sin datos";
+        const d = new Date(lastUpdated);
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }, [lastUpdated]);
 
       // ---------- Cálculo ----------
       const calc = (r) => {
@@ -183,23 +315,6 @@
         const a = document.createElement("a");
         a.href = url; a.download = "selector_parabolicas.csv"; a.click();
         URL.revokeObjectURL(url);
-      };
-
-      // Tests demo
-      const seedDemo = () => {
-        const a = { id: uid(), ticker: "DEMOA", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
-          shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", usdLiquidityM: "100",
-          catalyst: true, intradiaOK: true, comments: "Caso A: debería puntuar alto" };
-        const b = { id: uid(), ticker: "DEMOB", open: "50", close: "49", volToday: "300000", volAvg20: "500000", floatM: "60",
-          shortPct: "5", dtc: "1", atr14: "0.2", ema9: "49.2", ema200: "60", spreadPct: "1.2", usdLiquidityM: "15",
-          catalyst: false, intradiaOK: false, comments: "Caso B: debería puntuar bajo" };
-        const c = { id: uid(), ticker: "DEMO50", open: "2", close: "3.1", volToday: "600000", volAvg20: "400000", floatM: "9",
-          shortPct: "10", dtc: "1.8", atr14: "0.35", ema9: "2.2", ema200: "1.9", spreadPct: "0.6", usdLiquidityM: "4",
-          catalyst: false, intradiaOK: true, comments: "+55% pero RVOL moderado (prueba modo parabólico)" };
-        const d = { id: uid(), ticker: "DEMOHI", open: "4", close: "6.2", volToday: "12000000", volAvg20: "1500000", floatM: "12",
-          shortPct: "18", dtc: "2.6", atr14: "0.7", ema9: "5.6", ema200: "3.8", spreadPct: "0.25", usdLiquidityM: "200",
-          catalyst: true, intradiaOK: true, comments: "Alto RVOL y rotación, debería quedar >=70" };
-        setRows([a, b, c, d]);
       };
 
       // Datos charts
@@ -297,7 +412,6 @@
                 <button onClick={setPresetAgresivo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Agresivo</button>
                 <button onClick={sortByScore} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition">Ordenar por SCORE</button>
                 <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar CSV</button>
-                <button onClick={seedDemo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Cargar tests demo</button>
               </div>
             </div>
           </div>
@@ -453,21 +567,26 @@
 
             {/* Tabla */}
             <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                <h3 className="font-semibold">Tickers</h3>
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
+                <div>
+                  <h3 className="font-semibold">Tickers</h3>
+                  <div className="text-xs text-white/60 mt-0.5">Última actualización: {lastUpdatedLabel}{loadingQuotes ? " · actualizando" : ""}</div>
+                  {fetchError ? <div className="text-xs text-rose-300 mt-1">Error: {fetchError}</div> : null}
+                </div>
                 <div className="flex gap-2">
                   <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={addRow}>+ Agregar fila</button>
                   <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={clearRows}>Limpiar</button>
-                  <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={seedDemo}>Cargar tests demo</button>
+                  <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={refreshQuotes}>{loadingQuotes ? "Actualizando..." : "Actualizar ahora"}</button>
                 </div>
               </div>
               <div className="overflow-auto max-h-[60vh]">
-                <table className="min-w-full text-sm table-auto">
+                <table className="min-w-full text-xs table-fixed">
                   <thead>
-                    <tr className="sticky top-0 z-10 bg-slate-900/70 backdrop-blur">
+                    <tr className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur">
                       {[
-                        "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","Flags","SCORE","Notas"
-                      ].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
+                        "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%",
+                        "EMA50","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","Flags","SCORE"
+                      ].map((h,i)=> (<th key={i} className="px-2 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
                     </tr>
                   </thead>
                   <tbody>
@@ -475,30 +594,35 @@
                       const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r);
                       const selected = (r.id === selectedId) || (!selectedId && rows.length > 0 && r.id === rows[0].id);
                       return (
-                        <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
-                          <td className="px-3 py-2"><input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.open || ""} onChange={e=>update(r.id, "open", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.close || ""} onChange={e=>update(r.id, "close", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.volToday || ""} onChange={e=>update(r.id, "volToday", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.volAvg20 || ""} onChange={e=>update(r.id, "volAvg20", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(rvol)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.floatM || ""} onChange={e=>update(r.id, "floatM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(rotation,2)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.shortPct || ""} onChange={e=>update(r.id, "shortPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.dtc || ""} onChange={e=>update(r.id, "dtc", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" step="0.01" value={r.atr14 || ""} onChange={e=>update(r.id, "atr14", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(atrPct)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.ema9 || ""} onChange={e=>update(r.id, "ema9", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.ema200 || ""} onChange={e=>update(r.id, "ema200", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(chgPct)}</td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
-                          <td className="px-3 py-2"><input type="number" step="0.01" value={r.spreadPct || ""} onChange={e=>update(r.id, "spreadPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" step="0.1" value={r.usdLiquidityM || ""} onChange={e=>update(r.id, "usdLiquidityM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-[360px]">
+                        <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.04] hover:bg-white/[0.08] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
+                          <td className="px-2 py-1.5 font-semibold text-white/90">
+                            <div className="flex items-center gap-2">
+                              <span>{r.ticker || "—"}</span>
+                              <button onClick={(e)=>{e.stopPropagation(); removeRow(r.id);}} className="text-xs text-white/60 hover:text-rose-300 transition">✕</button>
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.open)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.close)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.volToday, 0)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.volAvg20, 0)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(rvol)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.floatM, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(rotation, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safePct(r.shortPct, 1)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.dtc, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.atr14, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safePct(atrPct)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.ema9, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.ema200, 2)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safePct(chgPct)}</td>
+                          <td className="px-2 py-1.5 text-center">{r.catalyst ? "Sí" : "—"}</td>
+                          <td className="px-2 py-1.5 text-center">{r.intradiaOK ? "Sí" : "—"}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safePct(r.spreadPct)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{safeFmt(r.usdLiquidityM, 2)}</td>
+                          <td className="px-2 py-1.5">
                             <div className="flex flex-wrap gap-1">
                               <Badge ok={flags.priceOK} label="Precio" />
-                              <Badge ok={flags.emaOK} label=">EMA9/200" />
+                              <Badge ok={flags.emaOK} label=">EMA" />
                               <Badge ok={flags.rvol2} label="RVOL≥2" />
                               <Badge ok={flags.rvol5} label="RVOL≥5" />
                               <Badge ok={flags.chgOK} label="%día" />
@@ -512,18 +636,18 @@
                               <Badge ok={flags.liqOK} label="USDliq" />
                             </div>
                           </td>
-                          <td className="px-3 py-2 w-48">
+                          <td className="px-2 py-1.5 w-44">
                             <div className="flex items-center gap-2">
-                              <span className="w-10 text-right font-semibold">{Math.round(score || 0)}</span>
+                              <span className="w-12 text-right font-semibold tabular-nums">{safeFmt(score, 0)}</span>
                               <div className="flex-1"><ScoreBar value={score || 0} /></div>
                             </div>
                           </td>
-                          <td className="px-3 py-2"><input value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} className="w-64 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="Notas"/></td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+              </div>
               </div>
             </div>
 
