@@ -751,13 +751,13 @@
                           <td className="px-3 py-2 w-[360px]">
                             <div className="flex flex-wrap gap-1">
                               <Badge ok={flags.priceOK} label="Precio" />
-                              <Badge ok={flags.emaOK} label=">EMA" />
+                              <Badge ok={flags.emaOK} label={"\u003eEMA"} />
                               <Badge ok={flags.rvol2} label="RVOL≥2" />
                               <Badge ok={flags.rvol5} label="RVOL≥5" />
                               <Badge ok={flags.chgOK} label="%día" />
                               <Badge ok={flags.atrOK} label="ATR" />
-                              <Badge ok={flags.float50} label="Float<50" />
-                              <Badge ok={flags.float10} label="Float<10" />
+                              <Badge ok={flags.float50} label={"Float\u003c50"} />
+                              <Badge ok={flags.float10} label={"Float\u003c10"} />
                               <Badge ok={flags.rot1} label="Rot≥1x" />
                               <Badge ok={flags.rot3} label="Rot≥3x" />
                               <Badge ok={flags.shortOK} label="Short%" />
@@ -784,7 +784,6 @@
               <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
             </div>
           </div>
-        </div>
       );
     }
 
