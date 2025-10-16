@@ -49,7 +49,7 @@
     };
 
     const MARKETS = {
-      US: { label: "EE.UU.", currency: "USD" },
+      US: { label: "EEUU", currency: "USD" },
       AR: { label: "Argentina", currency: "ARS" },
     };
 
@@ -120,6 +120,10 @@
         ? Sankey
         : () => <ChartFallback label="Sankey" />;
       // ---------- Umbrales ----------
+      const [refreshToken, setRefreshToken] = useState(0);
+      const [loadingQuotes, setLoadingQuotes] = useState(false);
+      const [fetchError, setFetchError] = useState(null);
+
       const [th, setTh] = useState({
         marketsEnabled: { US: true, AR: true },
         priceRange: {
