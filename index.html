@@ -94,7 +94,15 @@
         : () => <ChartFallback label="Sankey" />;
       // ---------- Umbrales ----------
       const [th, setTh] = useState({
-        priceMin: 1.5, priceMax: 20,
+        marketsEnabled: { US: true, AR: true },
+        priceRange: {
+          US: { min: 1.5, max: 20 },
+          AR: { min: 500, max: 8000 },
+        },
+        liquidityMin: {
+          US: 5,
+          AR: 150,
+        },
         rvolMin: 2, rvolIdeal: 5,
         atrMin: 0.5, atrPctMin: 3,
         chgMin: 10, parabolic50: false,
@@ -102,36 +110,84 @@
         float50: 50, float10: 10,
         rotationMin: 1, rotationIdeal: 3,
         shortMin: 15, spreadMaxPct: 1.0,
-        usdLiquidityMin: 5,
       });
 
+      const updatePriceRange = (market, field, value) => setTh(prev => ({
+        ...prev,
+        priceRange: {
+          ...prev.priceRange,
+          [market]: { ...(prev.priceRange?.[market] || {}), [field]: value },
+        },
+      }));
+      const updateLiquidityMin = (market, value) => setTh(prev => ({
+        ...prev,
+        liquidityMin: {
+          ...prev.liquidityMin,
+          [market]: value,
+        },
+      }));
+      const toggleMarket = (market, enabled) => setTh(prev => ({
+        ...prev,
+        marketsEnabled: {
+          ...prev.marketsEnabled,
+          [market]: enabled,
+        },
+      }));
+
       // ---------- Filas ----------
-      const [rows, setRows] = useState([
-        { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "",
-          shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "",
-          catalyst: false, intradiaOK: false, comments: "" }
-      ]);
-      const addRow = () => setRows(r => ([...r, { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "", shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "", catalyst: false, intradiaOK: false, comments: "" }]));
-      const clearRows = () => setRows([{ id: uid(), ticker: "", open: "", close: "" }]);
+      const createRow = (overrides = {}) => ({
+        id: uid(),
+        ticker: "",
+        market: "US",
+        open: "",
+        close: "",
+        volToday: "",
+        volAvg20: "",
+        floatM: "",
+        shortPct: "",
+        dtc: "",
+        atr14: "",
+        ema9: "",
+        ema200: "",
+        spreadPct: "",
+        liqM: "",
+        catalyst: false,
+        intradiaOK: false,
+        comments: "",
+        ...overrides,
+      });
+      const [rows, setRows] = useState([createRow()]);
+      const addRow = () => setRows(r => ([...r, createRow()]));
+      const clearRows = () => {
+        setRows([createRow()]);
+        setSelectedId(null);
+      };
       const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
 
       const [selectedId, setSelectedId] = useState(null);
 
       // ---------- Cálculo ----------
-      const calc = (r) => {
+      const calc = (r, forcedMarket) => {
+        const marketKey = forcedMarket || r.market || "US";
+        const priceCfg = th.priceRange?.[marketKey] || th.priceRange?.US || {};
+        const marketPriceMin = typeof priceCfg.min === "number" ? priceCfg.min : 0;
+        const marketPriceMax = typeof priceCfg.max === "number" ? priceCfg.max : Number.POSITIVE_INFINITY;
+        const liqCfg = th.liquidityMin?.[marketKey];
+        const marketLiquidityMin = typeof liqCfg === "number" ? liqCfg : 0;
+
         const open = toNum(r.open), close = toNum(r.close);
         const volToday = toNum(r.volToday), volAvg20 = toNum(r.volAvg20);
         const floatM = toNum(r.floatM), atr14 = toNum(r.atr14);
         const ema9 = toNum(r.ema9), ema200 = toNum(r.ema200);
         const shortPct = toNum(r.shortPct), dtc = toNum(r.dtc);
-        const spreadPct = toNum(r.spreadPct), usdLiquidityM = toNum(r.usdLiquidityM);
+        const spreadPct = toNum(r.spreadPct), liqM = toNum(r.liqM);
 
         const rvol = (typeof volToday === "number" && typeof volAvg20 === "number" && volAvg20 > 0) ? (volToday / volAvg20) : undefined;
         const atrPct = (typeof atr14 === "number" && typeof close === "number" && close > 0) ? (atr14 / close) * 100 : undefined;
         const chgPct = (typeof open === "number" && typeof close === "number" && open > 0) ? ((close - open) / open) * 100 : undefined;
         const rotation = (typeof volToday === "number" && typeof floatM === "number" && floatM > 0) ? (volToday / (floatM * 1e6)) : undefined;
 
-        const priceOK = typeof close === "number" && close >= th.priceMin && close <= th.priceMax;
+        const priceOK = typeof close === "number" && close >= marketPriceMin && close <= marketPriceMax;
         const emaOK = (typeof close === "number" && typeof ema9 === "number" && close > ema9 && (!th.needEMA200 || (typeof ema200 === "number" && close > ema200)));
         const rvol2 = typeof rvol === "number" && rvol >= th.rvolMin;
         const rvol5 = typeof rvol === "number" && rvol >= th.rvolIdeal;
@@ -143,7 +199,7 @@
         const rot3 = typeof rotation === "number" && rotation >= th.rotationIdeal;
         const shortOK = typeof shortPct === "number" && shortPct >= th.shortMin;
         const spreadOK = (typeof spreadPct !== "number") ? true : spreadPct <= th.spreadMaxPct;
-        const liqOK = (typeof usdLiquidityM !== "number") ? true : usdLiquidityM >= th.usdLiquidityMin;
+        const liqOK = (typeof liqM !== "number") ? true : liqM >= marketLiquidityMin;
 
         let score = 0;
         score += float10 ? 20 : (float50 ? 10 : 0);
@@ -161,31 +217,39 @@
         score += (r.catalyst ? 5 : 0);
 
         const flags = { priceOK, emaOK, rvol2, rvol5, chgOK, atrOK, float50, float10, rot1, rot3, shortOK, spreadOK, liqOK };
-        return { rvol, atrPct, chgPct, rotation, score, flags };
+        return { rvol, atrPct, chgPct, rotation, score, flags, market: marketKey, priceLimits: { min: marketPriceMin, max: marketPriceMax }, liquidityMin: marketLiquidityMin };
       };
 
-      const computed = useMemo(() => rows.map(r => ({ r, ...calc(r) })), [rows, th]);
+      const computed = useMemo(() => rows.map(r => {
+        const market = r.market || "US";
+        const result = calc(r, market);
+        const isActive = !!(th.marketsEnabled?.[market]);
+        return { r, ...result, isActive };
+      }), [rows, th]);
+      const activeComputed = useMemo(() => computed.filter(x => x.isActive), [computed]);
       const kpis = useMemo(() => {
-        const scores = computed.map(x => x.score || 0);
+        const scores = activeComputed.map(x => x.score || 0);
         const top = scores.length ? Math.max.apply(null, scores) : 0;
-        const inPlay = computed.filter(x => x.flags && x.flags.rvol2 && x.flags.priceOK && x.flags.emaOK).length;
-        const ready70 = computed.filter(x => (x.score || 0) >= 70).length;
-        return { top, inPlay, ready70, total: rows.length };
-      }, [computed, rows.length]);
+        const inPlay = activeComputed.filter(x => x.flags && x.flags.rvol2 && x.flags.priceOK && x.flags.emaOK).length;
+        const ready70 = activeComputed.filter(x => (x.score || 0) >= 70).length;
+        return { top, inPlay, ready70, total: activeComputed.length, totalAll: rows.length };
+      }, [activeComputed, rows.length]);
 
       // Presets / ordenar / export
       const setPresetModerado = () => setTh({ ...th, rvolMin: 2, rvolIdeal: 5, chgMin: 10, parabolic50: false, atrMin: 0.5, atrPctMin: 3, needEMA200: true });
       const setPresetAgresivo = () => setTh({ ...th, rvolMin: 3, rvolIdeal: 6, chgMin: 20, parabolic50: true, atrMin: 0.6, atrPctMin: 4, needEMA200: true });
-      const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b).score || 0) - (calc(a).score || 0)));
+      const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
       const exportCSV = () => {
         const headers = [
-          "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
+          "Ticker","Mercado","Moneda","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
         ];
         const lines = [headers.join(",")];
         rows.forEach(r => {
-          const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r);
+          const market = r.market || "US";
+          const info = MARKETS[market] || MARKETS.US;
+          const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
           lines.push([
-            r.ticker, r.open, r.close, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.usdLiquidityM, Math.round(score||0),
+            r.ticker, info.label, info.currency, r.open, r.close, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
             flags.priceOK, flags.emaOK, flags.rvol2, flags.rvol5, flags.chgOK, flags.atrOK, flags.float50, flags.float10, flags.rot1, flags.rot3, flags.shortOK, flags.spreadOK, flags.liqOK
           ].join(","));
         });
@@ -198,37 +262,37 @@
 
       // Tests demo
       const seedDemo = () => {
-        const a = { id: uid(), ticker: "DEMOA", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
-          shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", usdLiquidityM: "100",
-          catalyst: true, intradiaOK: true, comments: "Caso A: debería puntuar alto" };
-        const b = { id: uid(), ticker: "DEMOB", open: "50", close: "49", volToday: "300000", volAvg20: "500000", floatM: "60",
-          shortPct: "5", dtc: "1", atr14: "0.2", ema9: "49.2", ema200: "60", spreadPct: "1.2", usdLiquidityM: "15",
-          catalyst: false, intradiaOK: false, comments: "Caso B: debería puntuar bajo" };
-        const c = { id: uid(), ticker: "DEMO50", open: "2", close: "3.1", volToday: "600000", volAvg20: "400000", floatM: "9",
-          shortPct: "10", dtc: "1.8", atr14: "0.35", ema9: "2.2", ema200: "1.9", spreadPct: "0.6", usdLiquidityM: "4",
-          catalyst: false, intradiaOK: true, comments: "+55% pero RVOL moderado (prueba modo parabólico)" };
-        const d = { id: uid(), ticker: "DEMOHI", open: "4", close: "6.2", volToday: "12000000", volAvg20: "1500000", floatM: "12",
-          shortPct: "18", dtc: "2.6", atr14: "0.7", ema9: "5.6", ema200: "3.8", spreadPct: "0.25", usdLiquidityM: "200",
-          catalyst: true, intradiaOK: true, comments: "Alto RVOL y rotación, debería quedar >=70" };
+        const a = createRow({ ticker: "DEMOA", market: "US", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
+          shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", liqM: "100",
+          catalyst: true, intradiaOK: true, comments: "Caso A: debería puntuar alto" });
+        const b = createRow({ ticker: "DEMOB", market: "US", open: "50", close: "49", volToday: "300000", volAvg20: "500000", floatM: "60",
+          shortPct: "5", dtc: "1", atr14: "0.2", ema9: "49.2", ema200: "60", spreadPct: "1.2", liqM: "15",
+          catalyst: false, intradiaOK: false, comments: "Caso B: debería puntuar bajo" });
+        const c = createRow({ ticker: "DEMO50", market: "US", open: "2", close: "3.1", volToday: "600000", volAvg20: "400000", floatM: "9",
+          shortPct: "10", dtc: "1.8", atr14: "0.35", ema9: "2.2", ema200: "1.9", spreadPct: "0.6", liqM: "4",
+          catalyst: false, intradiaOK: true, comments: "+55% pero RVOL moderado (prueba modo parabólico)" });
+        const d = createRow({ ticker: "DEMOAR", market: "AR", open: "820", close: "915", volToday: "3500000", volAvg20: "900000", floatM: "45",
+          shortPct: "12", dtc: "2.1", atr14: "55", ema9: "870", ema200: "760", spreadPct: "0.45", liqM: "280",
+          catalyst: true, intradiaOK: true, comments: "Ejemplo Argentina con ruptura y buen volumen" });
         setRows([a, b, c, d]);
       };
 
       // Datos charts
       const scoreBuckets = useMemo(() => {
-        const hi = computed.filter(x => (x.score || 0) >= 70).length;
-        const mid = computed.filter(x => (x.score || 0) >= 40 && (x.score || 0) < 70).length;
-        const lo = Math.max(0, (rows.length || 0) - hi - mid);
+        const hi = activeComputed.filter(x => (x.score || 0) >= 70).length;
+        const mid = activeComputed.filter(x => (x.score || 0) >= 40 && (x.score || 0) < 70).length;
+        const lo = Math.max(0, (activeComputed.length || 0) - hi - mid);
         return [
           { name: ">=70", value: hi, color: COLORS.scoreHi },
           { name: "40–69", value: mid, color: COLORS.scoreMid },
           { name: "<40", value: lo, color: COLORS.scoreLo },
         ];
-      }, [computed, rows.length]);
+      }, [activeComputed]);
 
       // Embudo
       const sankeyData = useMemo(() => {
-        const nUniverse = rows.length;
-        const price = computed.filter(x => x.flags.priceOK);
+        const nUniverse = activeComputed.length;
+        const price = activeComputed.filter(x => x.flags.priceOK);
         const ema = price.filter(x => x.flags.emaOK);
         const rvol2 = ema.filter(x => x.flags.rvol2);
         const ready = rvol2.filter(x => (x.score || 0) >= 70);
@@ -247,14 +311,14 @@
             { source: 3, target: 4, value: ready.length },
           ],
         };
-      }, [rows.length, computed]);
+      }, [activeComputed]);
 
       // Radar
       const selectedRow = useMemo(() => {
         const found = rows.find(r => r.id === selectedId);
         return found ? found : rows[0];
       }, [selectedId, rows]);
-      const selectedCalc = useMemo(() => (selectedRow ? calc(selectedRow) : null), [selectedRow]);
+      const selectedCalc = useMemo(() => (selectedRow ? calc(selectedRow, selectedRow.market) : null), [selectedRow, th]);
       const radarData = useMemo(() => {
         if (!selectedCalc) return [];
         const r = selectedCalc;
@@ -296,7 +360,7 @@
 
               {/* KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-                <Stat label="Tickers" value={kpis.total} icon={"📈"} />
+                <Stat label="Tickers activos" value={kpis.total} sub={`de ${kpis.totalAll}`} icon={"📈"} />
                 <Stat label="Máximo" value={Math.round(kpis.top)} icon={"🎯"} />
                 <Stat label="En juego" value={kpis.inPlay} icon={"⚡"} />
                 <Stat label="Listas 70+" value={kpis.ready70} icon={"🚀"} />
@@ -310,6 +374,19 @@
                 <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar CSV</button>
                 <button onClick={seedDemo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Cargar tests demo</button>
               </div>
+              <div className="mt-6 text-center">
+                <div className="text-sm font-medium text-white/80">Mercados a escanear</div>
+                <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+                  {Object.entries(MARKETS).map(([key, info]) => (
+                    <label key={key} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15 text-sm">
+                      <input type="checkbox" className="accent-emerald-400" checked={!!th.marketsEnabled?.[key]} onChange={e=>toggleMarket(key, e.target.checked)} />
+                      <span>{info.label}</span>
+                      <span className="text-xs text-white/60">({info.currency})</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="text-xs text-white/60 mt-2">Solo se computan los tickers de los mercados activos.</div>
+              </div>
             </div>
           </div>
 
@@ -320,15 +397,22 @@
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm text-center">
-                  <label className="col-span-2 flex flex-col items-center">
-                    <span>Rango de precio (USD)</span>
-                    <div className="flex gap-3 mt-1 justify-center">
-                      <input type="number" step="0.05" value={th.priceMin} onChange={e=>setTh({...th, priceMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                      <input type="number" step="0.05" value={th.priceMax} onChange={e=>setTh({...th, priceMax: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                    </div>
-                  </label>
+                  <div className="col-span-2 space-y-3">
+                    {Object.entries(MARKETS).map(([key, info]) => {
+                      const cfg = th.priceRange?.[key] || {};
+                      return (
+                        <label key={key} className="flex flex-col items-center">
+                          <span>{info.label} ({info.currency})</span>
+                          <div className="flex gap-3 mt-1 justify-center">
+                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                   <label className="flex flex-col items-center justify-center">
-                    <span>ATR ≥ (USD)</span>
+                    <span>ATR ≥ (moneda local)</span>
                     <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
                   </label>
                   <label className="flex flex-col items-center justify-center">
@@ -381,10 +465,14 @@
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm text-center">
-                  <label className="flex flex-col items-center">
-                    <span>Liquidez USD ≥ (M)</span>
-                    <input type="number" step="0.5" value={th.usdLiquidityMin} onChange={e=>setTh({...th, usdLiquidityMin: Number(e.target.value)})} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
-                  </label>
+                  <div className="col-span-2 space-y-3">
+                    {Object.entries(MARKETS).map(([key, info]) => (
+                      <label key={key} className="flex flex-col items-center">
+                        <span>Liquidez mínima (M, {info.currency})</span>
+                        <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                      </label>
+                    ))}
+                  </div>
                   <label className="flex flex-col items-center">
                     <span>Spread ≤ %</span>
                     <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
@@ -422,7 +510,7 @@
                     <div className="text-xs text-white/70">tickers</div>
                   </div>
                 </div>
-                <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra el total cargado.</div>
+                <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra los tickers activos.</div>
               </div>
 
               {/* Sankey */}
@@ -477,17 +565,28 @@
                   <thead>
                     <tr className="sticky top-0 z-10 bg-slate-900/70 backdrop-blur">
                       {[
-                        "Ticker","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","USD Liquidez(M)","Flags","SCORE","Notas"
+                        "Ticker/Mercado","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"
                       ].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((r) => {
-                      const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r);
+                      const market = r.market || "US";
+                      const info = MARKETS[market] || MARKETS.US;
+                      const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
                       const selected = (r.id === selectedId) || (!selectedId && rows.length > 0 && r.id === rows[0].id);
                       return (
                         <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
-                          <td className="px-3 py-2"><input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/></td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-col gap-1">
+                              <input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/>
+                              <select value={market} onChange={e=>update(r.id, "market", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs">
+                                {Object.entries(MARKETS).map(([key, m]) => (
+                                  <option key={key} value={key} className="bg-slate-900">{m.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
                           <td className="px-3 py-2"><input type="number" value={r.open || ""} onChange={e=>update(r.id, "open", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
                           <td className="px-3 py-2"><input type="number" value={r.close || ""} onChange={e=>update(r.id, "close", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
                           <td className="px-3 py-2"><input type="number" value={r.volToday || ""} onChange={e=>update(r.id, "volToday", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
@@ -505,7 +604,12 @@
                           <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
                           <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
                           <td className="px-3 py-2"><input type="number" step="0.01" value={r.spreadPct || ""} onChange={e=>update(r.id, "spreadPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" step="0.1" value={r.usdLiquidityM || ""} onChange={e=>update(r.id, "usdLiquidityM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-col gap-1 items-end">
+                              <input type="number" step="0.1" value={r.liqM || ""} onChange={e=>update(r.id, "liqM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                              <span className="text-[10px] text-white/60">{info.currency}</span>
+                            </div>
+                          </td>
                           <td className="px-3 py-2 w-[360px]">
                             <div className="flex flex-wrap gap-1">
                               <Badge ok={flags.priceOK} label="Precio" />
@@ -520,7 +624,7 @@
                               <Badge ok={flags.rot3} label="Rot≥3x" />
                               <Badge ok={flags.shortOK} label="Short%" />
                               <Badge ok={flags.spreadOK} label="Spread" />
-                              <Badge ok={flags.liqOK} label="USDliq" />
+                              <Badge ok={flags.liqOK} label={`Liq ${info.currency}`} />
                             </div>
                           </td>
                           <td className="px-3 py-2 w-48">
@@ -539,7 +643,7 @@
             </div>
 
             <div className="mt-4 text-xs text-white/70 text-center">
-              <p>Tips: Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
+              <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
             </div>
           </div>
         </div>
