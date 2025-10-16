@@ -48,6 +48,11 @@
       link: "#38bdf8",
     };
 
+    const MARKETS = {
+      US: { label: "EEUU", currency: "USD" },
+      AR: { label: "Argentina", currency: "ARS" },
+    };
+
     const defaultTickers = ["AAPL", "TSLA", "NVDA", "MSFT"];
     const emptyRow = (ticker = "") => ({
       id: uid(),
@@ -115,6 +120,10 @@
         ? Sankey
         : () => <ChartFallback label="Sankey" />;
       // ---------- Umbrales ----------
+      const [refreshToken, setRefreshToken] = useState(0);
+      const [loadingQuotes, setLoadingQuotes] = useState(false);
+      const [fetchError, setFetchError] = useState(null);
+
       const [th, setTh] = useState({
         marketsEnabled: { US: true, AR: true },
         priceRange: {
