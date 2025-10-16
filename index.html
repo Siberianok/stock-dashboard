@@ -4,12 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Selector de Acciones – Parabólicas (Standalone)</title>
-    <!-- Tailwind Play CDN (dev/prototipado) -->
+    <!-- Tailwind Play CDN (prototipo) -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- React 18 UMD -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel Standalone para compilar JSX en el navegador (prototipo) -->
+    <!-- Babel Standalone para compilar JSX en el navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Recharts UMD -->
     <script src="https://unpkg.com/recharts@2.10.4/umd/Recharts.min.js"></script>
@@ -21,7 +21,7 @@
       const { useMemo, useState } = React;
       const { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Sankey } = Recharts;
 
-      // ---------------- Iconos inline (SVG simples) ----------------
+      // ---------------- Iconos inline (SVG) ----------------
       const IconWrap = ({children}) => (
         <div className="p-3 rounded-2xl bg-white/10 flex items-center justify-center">{children}</div>
       );
@@ -51,7 +51,7 @@
         </svg>
       );
 
-      // -------------------------------- Utilidades --------------------------------
+      // ---------------- Utilidades ----------------
       const fmt = (n, d = 2) => (typeof n === "number" && isFinite(n) ? n.toFixed(d) : "");
       const toNum = (v) => {
         if (v === "" || v === undefined || v === null) return undefined;
@@ -93,7 +93,7 @@
       );
 
       function App(){
-        // ----------------------- Umbrales (editables) -----------------------
+        // ---------------- Umbrales ----------------
         const [th, setTh] = useState({
           priceMin: 1.5,
           priceMax: 20,
@@ -113,7 +113,7 @@
           usdLiquidityMin: 5, // en millones
         });
 
-        // ---------------------------- Datos (filas) ----------------------------
+        // --------------- Filas ----------------
         const [rows, setRows] = useState([
           { id: uid(), ticker: "", open: "", close: "", volToday: "", volAvg20: "", floatM: "",
             shortPct: "", dtc: "", atr14: "", ema9: "", ema200: "", spreadPct: "", usdLiquidityM: "",
@@ -124,10 +124,9 @@
         const clearRows = () => setRows([{ id: uid(), ticker: "", open: "", close: "" }]);
         const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
 
-        // Fila seleccionada para el radar
         const [selectedId, setSelectedId] = useState(null);
 
-        // ----------------------------- Cálculo fila -----------------------------
+        // --------------- Cálculos ----------------
         const calc = (r) => {
           const open = toNum(r.open); const close = toNum(r.close);
           const volToday = toNum(r.volToday); const volAvg20 = toNum(r.volAvg20);
@@ -152,7 +151,7 @@
           const rot1 = typeof rotation === "number" && rotation >= th.rotationMin;
           const rot3 = typeof rotation === "number" && rotation >= th.rotationIdeal;
           const shortOK = typeof shortPct === "number" && shortPct >= th.shortMin;
-          const spreadOK = (typeof spreadPct !== "number") ? true : spreadPct <= th.spreadMaxPct; // si no hay dato, no penaliza
+          const spreadOK = (typeof spreadPct !== "number") ? true : spreadPct <= th.spreadMaxPct;
           const liqOK = (typeof usdLiquidityM !== "number") ? true : usdLiquidityM >= th.usdLiquidityMin;
 
           let score = 0;
@@ -174,7 +173,7 @@
           return { rvol, atrPct, chgPct, rotation, score, flags };
         };
 
-        // ---------------------------- Resumen (KPIs) ----------------------------
+        // KPIs
         const computed = useMemo(() => rows.map(r => ({ r, ...calc(r) })), [rows, th]);
         const kpis = useMemo(() => {
           const scores = computed.map(x => x.score || 0);
@@ -184,7 +183,7 @@
           return { top, inPlay, ready70, total: rows.length };
         }, [computed, rows.length]);
 
-        // ------------------------------ Acciones UI ------------------------------
+        // Acciones UI
         const setPresetModerado = () => setTh({ ...th, rvolMin: 2, rvolIdeal: 5, chgMin: 10, parabolic50: false, atrMin: 0.5, atrPctMin: 3, needEMA200: true });
         const setPresetAgresivo = () => setTh({ ...th, rvolMin: 3, rvolIdeal: 6, chgMin: 20, parabolic50: true, atrMin: 0.6, atrPctMin: 4, needEMA200: true });
         const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b).score || 0) - (calc(a).score || 0)));
@@ -207,7 +206,7 @@
           URL.revokeObjectURL(url);
         };
 
-        // ------------------------------ Tests demo ------------------------------
+        // Tests demo
         const seedDemo = () => {
           const a = { id: uid(), ticker: "DEMOA", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
             shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", usdLiquidityM: "100",
@@ -224,7 +223,7 @@
           setRows([a, b, c, d]);
         };
 
-        // ------------------------------ Datos charts ------------------------------
+        // Datos charts
         const scoreBuckets = useMemo(() => {
           const hi = computed.filter(x => (x.score || 0) >= 70).length;
           const mid = computed.filter(x => (x.score || 0) >= 40 && (x.score || 0) < 70).length;
@@ -236,7 +235,7 @@
           ];
         }, [computed, rows.length]);
 
-        // Embudo (Sankey): Universe -> PrecioOK -> EMAOK -> RVOL≥2 -> SCORE>=70
+        // Embudo (Sankey)
         const sankeyData = useMemo(() => {
           const nUniverse = rows.length;
           const price = computed.filter(x => x.flags.priceOK).map(x => x);
@@ -261,7 +260,7 @@
           };
         }, [rows.length, computed]);
 
-        // Radar por ticker seleccionado (normalización simple 0–100)
+        // Radar
         const selectedRow = useMemo(() => rows.find(r => r.id === selectedId) || rows[0], [selectedId, rows]);
         const selectedCalc = useMemo(() => (selectedRow ? calc(selectedRow) : null), [selectedRow]);
         const radarData = useMemo(() => {
@@ -332,7 +331,7 @@
                 <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                   <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm text-center">
-                    {/* Fila 1: Rango (col-span-2) */}
+                    {/* Fila 1: Rango */}
                     <label className="col-span-2 flex flex-col items-center">
                       <span>Rango de precio (USD)</span>
                       <div className="flex gap-3 mt-1 justify-center">
@@ -349,12 +348,12 @@
                       <span>ATR% ≥</span>
                       <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
                     </label>
-                    {/* Fila 3: %día (col-span-2) */}
+                    {/* Fila 3: %día */}
                     <label className="col-span-2 flex flex-col items-center">
                       <span>%día ≥</span>
                       <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 mx-auto"/>
                     </label>
-                    {/* Fila 4: check (col-span-2) */}
+                    {/* Fila 4: check */}
                     <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
                       <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
                       <span>Modo parabólico (≥ 50%)</span>
@@ -479,7 +478,7 @@
                   </div>
                 </div>
 
-                <div className="overflow-auto max-h:[60vh]">
+                <div className="overflow-auto max-h-[60vh]">
                   <table className="min-w-full text-sm table-auto">
                     <thead>
                       <tr className="sticky top-0 z-10 bg-slate-900/70 backdrop-blur">
