@@ -23,26 +23,12 @@
   <script type="text/babel"
           data-presets="env,react"
           data-plugins="transform-optional-chaining,transform-nullish-coalescing-operator,transform-object-rest-spread">
-    const { useState, useMemo } = React;
-    const MARKETS = {
-      US: { label: "EEUU", currency: "USD" },
-      AR: { label: "Argentina", currency: "ARS" },
-    };
-    const chartsAvailable = !!window.Recharts;
-    const {
-      ResponsiveContainer, Tooltip,
-      PieChart, Pie, Cell,
-      RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-      Sankey,
-    } = chartsAvailable ? window.Recharts : {};
+    const { useState, useMemo, useEffect } = React;
     const ChartFallback = ({ label }) => (
       <div className="h-full flex items-center justify-center text-xs text-white/60">
         {label} (Recharts no disponible)
       </div>
     );
-    const SankeyComp = (chartsAvailable && Sankey)
-      ? Sankey
-      : () => <ChartFallback label="Sankey" />;
 
     // ------------ Utils -------------
     const fmt = (n, d = 2) => (typeof n === "number" && isFinite(n) ? n.toFixed(d) : "");
@@ -85,6 +71,27 @@
     );
 
     function App() {
+      const [chartsAvailable, setChartsAvailable] = useState(!!window.Recharts);
+      useEffect(() => {
+        if (chartsAvailable) return;
+        const id = window.setInterval(() => {
+          if (window.Recharts) {
+            setChartsAvailable(true);
+            window.clearInterval(id);
+          }
+        }, 200);
+        return () => window.clearInterval(id);
+      }, [chartsAvailable]);
+
+      const {
+        ResponsiveContainer, Tooltip,
+        PieChart, Pie, Cell,
+        RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+        Sankey,
+      } = chartsAvailable ? window.Recharts : {};
+      const SankeyComp = (chartsAvailable && Sankey)
+        ? Sankey
+        : () => <ChartFallback label="Sankey" />;
       // ---------- Umbrales ----------
       const [th, setTh] = useState({
         marketsEnabled: { US: true, AR: true },
