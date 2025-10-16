@@ -33,6 +33,23 @@
 
     // ------------ Utils -------------
     const fmt = (n, d = 2) => (typeof n === "number" && isFinite(n) ? n.toFixed(d) : "");
+    const safeNumber = (value, digits = 2) => {
+      const n = toNum(value);
+      if (typeof n === "number" && isFinite(n)) {
+        return n.toLocaleString("es-AR", {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        });
+      }
+      return "—";
+    };
+    const safeInteger = (value) => {
+      const n = toNum(value);
+      if (typeof n === "number" && isFinite(n)) {
+        return Math.round(n).toLocaleString("es-AR");
+      }
+      return "—";
+    };
     const toNum = (v) => {
       if (v === "" || v === undefined || v === null) return undefined;
       const n = (typeof v === "number") ? v : Number(String(v).replace(/,/g, ""));
@@ -53,28 +70,6 @@
       US: { label: "EEUU", currency: "USD" },
       AR: { label: "Argentina", currency: "ARS" },
     };
-
-    const defaultTickers = ["AAPL", "TSLA", "NVDA", "MSFT"];
-    const emptyRow = (ticker = "") => ({
-      id: uid(),
-      ticker: ticker.toUpperCase(),
-      open: undefined,
-      close: undefined,
-      volToday: undefined,
-      volAvg20: undefined,
-      floatM: undefined,
-      shortPct: undefined,
-      dtc: undefined,
-      atr14: undefined,
-      ema9: undefined,
-      ema200: undefined,
-      spreadPct: undefined,
-      usdLiquidityM: undefined,
-      catalyst: false,
-      intradiaOK: false,
-      comments: "",
-      lastUpdate: null,
-    });
 
     function ScoreBar({ value }) {
       const v = Math.max(0, Math.min(100, value || 0));
@@ -171,21 +166,25 @@
         id: uid(),
         ticker: "",
         market: "US",
-        open: "",
-        close: "",
-        volToday: "",
-        volAvg20: "",
-        floatM: "",
-        shortPct: "",
-        dtc: "",
-        atr14: "",
-        ema9: "",
-        ema200: "",
-        spreadPct: "",
-        liqM: "",
+        open: undefined,
+        close: undefined,
+        bid: undefined,
+        ask: undefined,
+        avgPrice: undefined,
+        volToday: undefined,
+        volAvg20: undefined,
+        floatM: undefined,
+        shortPct: undefined,
+        dtc: undefined,
+        atr14: undefined,
+        ema9: undefined,
+        ema200: undefined,
+        spreadPct: undefined,
+        liqM: undefined,
         catalyst: false,
         intradiaOK: false,
         comments: "",
+        lastUpdate: null,
         ...overrides,
       });
       const [rows, setRows] = useState([createRow()]);
@@ -234,9 +233,16 @@
               const avgVolForDtc = volAvg10 || volAvg3m;
               const ask = toNum(quote.ask);
               const bid = toNum(quote.bid);
-              const atrApprox = (toNum(quote.regularMarketDayHigh) && toNum(quote.regularMarketDayLow))
-                ? (toNum(quote.regularMarketDayHigh) - toNum(quote.regularMarketDayLow))
+              const dayHigh = toNum(quote.regularMarketDayHigh);
+              const dayLow = toNum(quote.regularMarketDayLow);
+              const atrApprox = (dayHigh && dayLow)
+                ? (dayHigh - dayLow)
                 : undefined;
+              const avgPrice = (dayHigh && dayLow)
+                ? (dayHigh + dayLow) / 2
+                : (typeof open === "number" && typeof close === "number"
+                  ? (open + close) / 2
+                  : undefined);
               const spreadPct = (ask && bid && close)
                 ? ((ask - bid) / close) * 100
                 : undefined;
@@ -250,6 +256,9 @@
                 ...row,
                 open,
                 close,
+                bid,
+                ask,
+                avgPrice,
                 volToday,
                 volAvg20: volAvg10,
                 floatM: floatShares ? floatShares / 1e6 : undefined,
@@ -259,7 +268,7 @@
                 ema9: toNum(quote.fiftyDayAverage),
                 ema200: toNum(quote.twoHundredDayAverage),
                 spreadPct,
-                usdLiquidityM,
+                liqM: usdLiquidityM,
                 lastUpdate: new Date().toISOString(),
               };
             }));
@@ -282,13 +291,15 @@
 
       const refreshQuotes = () => setRefreshToken(Date.now());
 
-      const safeFmt = (value, digits = 2) => {
-        const out = fmt(toNum(value), digits);
-        return out === "" ? "—" : out;
-      };
       const safePct = (value, digits = 2) => {
-        const out = fmt(toNum(value), digits);
-        return out === "" ? "—" : `${out}%`;
+        const n = toNum(value);
+        if (typeof n === "number" && isFinite(n)) {
+          return `${n.toLocaleString("es-AR", {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits,
+          })}%`;
+        }
+        return "—";
       };
       const lastUpdated = useMemo(() => {
         const stamps = rows.map(r => r.lastUpdate).filter(Boolean);
@@ -376,7 +387,7 @@
       const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
       const exportCSV = () => {
         const headers = [
-          "Ticker","Mercado","Moneda","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
+          "Ticker","Mercado","Moneda","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
         ];
         const lines = [headers.join(",")];
         rows.forEach(r => {
@@ -384,7 +395,7 @@
           const info = MARKETS[market] || MARKETS.US;
           const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
           lines.push([
-            r.ticker, info.label, info.currency, r.open, r.close, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
+            r.ticker, info.label, info.currency, r.open, r.close, r.bid, r.ask, r.avgPrice, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
             flags.priceOK, flags.emaOK, flags.rvol2, flags.rvol5, flags.chgOK, flags.atrOK, flags.float50, flags.float10, flags.rot1, flags.rot3, flags.shortOK, flags.spreadOK, flags.liqOK
           ].join(","));
         });
@@ -397,19 +408,53 @@
 
       // Tests demo
       const seedDemo = () => {
-        const a = createRow({ ticker: "DEMOA", market: "US", open: "8", close: "10", volToday: "10000000", volAvg20: "2000000", floatM: "8",
-          shortPct: "20", dtc: "3.5", atr14: "0.8", ema9: "9.5", ema200: "7", spreadPct: "0.3", liqM: "100",
-          catalyst: true, intradiaOK: true, comments: "Caso A: debería puntuar alto" });
-        const b = createRow({ ticker: "DEMOB", market: "US", open: "50", close: "49", volToday: "300000", volAvg20: "500000", floatM: "60",
-          shortPct: "5", dtc: "1", atr14: "0.2", ema9: "49.2", ema200: "60", spreadPct: "1.2", liqM: "15",
-          catalyst: false, intradiaOK: false, comments: "Caso B: debería puntuar bajo" });
-        const c = createRow({ ticker: "DEMO50", market: "US", open: "2", close: "3.1", volToday: "600000", volAvg20: "400000", floatM: "9",
-          shortPct: "10", dtc: "1.8", atr14: "0.35", ema9: "2.2", ema200: "1.9", spreadPct: "0.6", liqM: "4",
-          catalyst: false, intradiaOK: true, comments: "+55% pero RVOL moderado (prueba modo parabólico)" });
-        const d = createRow({ ticker: "DEMOAR", market: "AR", open: "820", close: "915", volToday: "3500000", volAvg20: "900000", floatM: "45",
-          shortPct: "12", dtc: "2.1", atr14: "55", ema9: "870", ema200: "760", spreadPct: "0.45", liqM: "280",
-          catalyst: true, intradiaOK: true, comments: "Ejemplo Argentina con ruptura y buen volumen" });
-        setRows([a, b, c, d]);
+        const pool = ["DEMOA", "DEMOB", "DEMOC", "DEMOD", "DEMOE", "DEMOF", "DEMOG", "DEMOH"];
+        const now = new Date().toISOString();
+        const sample = pool.slice(0, 6).map((ticker, idx) => {
+          const market = idx % 5 === 0 ? "AR" : "US";
+          const base = market === "US" ? 5 + Math.random() * 45 : 500 + Math.random() * 7000;
+          const open = Number((base * (0.95 + Math.random() * 0.05)).toFixed(2));
+          const move = (Math.random() * 0.18) - 0.04;
+          const close = Number((open * (1 + move)).toFixed(2));
+          const bid = Number((close * (0.995 - Math.random() * 0.003)).toFixed(2));
+          const ask = Number((close * (1.002 + Math.random() * 0.004)).toFixed(2));
+          const avgPrice = Number(((open + close) / 2).toFixed(2));
+          const volAvg20 = Math.round(250000 + Math.random() * 8000000);
+          const volToday = Math.round(volAvg20 * (1.2 + Math.random() * 4));
+          const floatM = Number((5 + Math.random() * 80).toFixed(2));
+          const shortPct = Number((Math.random() * 35).toFixed(2));
+          const atr14 = Number((base * (0.02 + Math.random() * 0.08)).toFixed(2));
+          const ema9 = Number((close * (0.96 + Math.random() * 0.08)).toFixed(2));
+          const ema200 = Number((close * (0.9 + Math.random() * 0.2)).toFixed(2));
+          const spreadPct = Number((((ask - bid) / close) * 100).toFixed(2));
+          const liqM = Number(((close * volToday) / 1e6).toFixed(1));
+          const dtc = Math.max(0.3, Number(((shortPct / 100) * floatM * 1e6 / Math.max(volAvg20, 1)).toFixed(2)));
+          return createRow({
+            ticker,
+            market,
+            open,
+            close,
+            bid,
+            ask,
+            avgPrice,
+            volToday,
+            volAvg20,
+            floatM,
+            shortPct,
+            dtc,
+            atr14,
+            ema9,
+            ema200,
+            spreadPct,
+            liqM,
+            catalyst: Math.random() > 0.6,
+            intradiaOK: Math.random() > 0.5,
+            comments: "Demo autogenerado",
+            lastUpdate: now,
+          });
+        });
+        setRows(sample);
+        setSelectedId(sample[0]?.id || null);
       };
 
       // Datos charts
@@ -506,6 +551,7 @@
                 <button onClick={setPresetModerado} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Moderado</button>
                 <button onClick={setPresetAgresivo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Agresivo</button>
                 <button onClick={sortByScore} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition">Ordenar por SCORE</button>
+                <button onClick={seedDemo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Test aleatorio</button>
                 <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar CSV</button>
               </div>
               <div className="mt-6 text-center">
@@ -530,32 +576,32 @@
               {/* Precio & Volatilidad */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center">
+                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
                   <div className="col-span-2 space-y-3">
                     {Object.entries(MARKETS).map(([key, info]) => {
                       const cfg = th.priceRange?.[key] || {};
                       return (
-                        <label key={key} className="flex flex-col items-center">
+                        <label key={key} className="flex flex-col items-center gap-2">
                           <span>{info.label} ({info.currency})</span>
-                          <div className="flex gap-3 mt-1 justify-center">
-                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
-                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                          <div className="flex gap-3 justify-center">
+                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                           </div>
                         </label>
                       );
                     })}
                   </div>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>ATR ≥ (moneda local)</span>
-                    <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>ATR% ≥</span>
-                    <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="col-span-2 flex flex-col items-center">
+                  <label className="col-span-2 flex flex-col items-center gap-2">
                     <span>%día ≥</span>
-                    <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
                   <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
                     <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
@@ -567,30 +613,30 @@
               {/* Volumen & Float */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center">
-                  <label className="flex flex-col items-center justify-center">
+                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>RVOL ≥</span>
-                    <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>RVOL ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>Pref. Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>Rotación ≥</span>
-                    <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
-                  <label className="flex flex-col items-center justify-center">
+                  <label className="flex flex-col items-center justify-center gap-2">
                     <span>Rotación ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
                 </div>
               </div>
@@ -598,18 +644,18 @@
               {/* Técnico & Micro */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-center">
+                <div className="grid grid-cols-2 gap-4 text-sm text-center place-items-center">
                   <div className="col-span-2 space-y-3">
                     {Object.entries(MARKETS).map(([key, info]) => (
-                      <label key={key} className="flex flex-col items-center">
+                      <label key={key} className="flex flex-col items-center gap-2">
                         <span>Liquidez mínima (M, {info.currency})</span>
-                        <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                        <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                       </label>
                     ))}
                   </div>
-                  <label className="flex flex-col items-center">
+                  <label className="flex flex-col items-center gap-2">
                     <span>Spread ≤ %</span>
-                    <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 mt-1"/>
+                    <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-full max-w-[8.5rem] border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
                   </label>
                   <label className="col-span-2 flex items-center justify-center gap-2 mt-1">
                     <input type="checkbox" checked={th.needEMA200} onChange={e=>setTh({...th, needEMA200: e.target.checked})}/>
@@ -703,7 +749,7 @@
                   <thead>
                     <tr className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur">
                       {[
-                        "Ticker/Mercado","Open","Close","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"
+                        "Ticker/Mercado","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC (TTS)","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"
                       ].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
                     </tr>
                   </thead>
@@ -725,26 +771,29 @@
                               </select>
                             </div>
                           </td>
-                          <td className="px-3 py-2"><input type="number" value={r.open || ""} onChange={e=>update(r.id, "open", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.close || ""} onChange={e=>update(r.id, "close", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.volToday || ""} onChange={e=>update(r.id, "volToday", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.volAvg20 || ""} onChange={e=>update(r.id, "volAvg20", e.target.value)} className="w-28 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(rvol)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.floatM || ""} onChange={e=>update(r.id, "floatM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(rotation,2)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.shortPct || ""} onChange={e=>update(r.id, "shortPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.dtc || ""} onChange={e=>update(r.id, "dtc", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" step="0.01" value={r.atr14 || ""} onChange={e=>update(r.id, "atr14", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(atrPct)}</td>
-                          <td className="px-3 py-2"><input type="number" value={r.ema9 || ""} onChange={e=>update(r.id, "ema9", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2"><input type="number" value={r.ema200 || ""} onChange={e=>update(r.id, "ema200", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2 w-20 text-right">{fmt(chgPct)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.close)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.bid)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.ask)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.avgPrice)}</td>
+                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volToday)}</td>
+                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volAvg20)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rvol)}</td>
+                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.floatM)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rotation)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.shortPct)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.dtc)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.atr14)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(atrPct)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema9)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema200)}</td>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(chgPct)}</td>
                           <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
                           <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
-                          <td className="px-3 py-2"><input type="number" step="0.01" value={r.spreadPct || ""} onChange={e=>update(r.id, "spreadPct", e.target.value)} className="w-20 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/></td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-col gap-1 items-end">
-                              <input type="number" step="0.1" value={r.liqM || ""} onChange={e=>update(r.id, "liqM", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1"/>
+                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.spreadPct)}</td>
+                          <td className="px-3 py-2 w-24">
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="tabular-nums">{safeNumber(r.liqM, 1)}</span>
                               <span className="text-[10px] text-white/60">{info.currency}</span>
                             </div>
                           </td>
@@ -767,9 +816,12 @@
                           </td>
                           <td className="px-2 py-1.5 w-44">
                             <div className="flex items-center gap-2">
-                              <span className="w-12 text-right font-semibold tabular-nums">{safeFmt(score, 0)}</span>
+                              <span className="w-12 text-right font-semibold tabular-nums">{safeNumber(score, 0)}</span>
                               <div className="flex-1"><ScoreBar value={score || 0} /></div>
                             </div>
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <textarea value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} rows={2} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs" placeholder="Notas" />
                           </td>
                         </tr>
                       );
