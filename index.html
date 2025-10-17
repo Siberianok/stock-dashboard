@@ -50,6 +50,13 @@
       }
       return "—";
     };
+    const friendlyFetchError = (err) => {
+      const raw = (err?.message || "").toLowerCase();
+      if (raw.includes("failed to fetch") || raw.includes(".filedtofetch") || raw.includes("network")) {
+        return "No se pudo conectar con Yahoo Finance. Revisa tu conexión e inténtalo nuevamente en unos minutos.";
+      }
+      return err?.message || "Error al obtener datos";
+    };
     const toNum = (v) => {
       if (v === "" || v === undefined || v === null) return undefined;
       const n = (typeof v === "number") ? v : Number(String(v).replace(/,/g, ""));
@@ -98,13 +105,14 @@
     const Badge = ({ ok, label }) => (
       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>{label}</span>
     );
-    const Stat = ({ label, value, sub, icon }) => (
+    const Stat = ({ label, value, sub, icon, extra }) => (
       <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
         <div className="p-3 rounded-2xl bg-white/10 flex items-center justify-center text-2xl">{icon}</div>
         <div>
           <div className="text-3xl font-semibold text-white leading-tight">{value}</div>
           <div className="text-sm text-white/80">{label}</div>
           {sub ? <div className="text-xs text-white/60 mt-1">{sub}</div> : null}
+          {extra ? <div className="text-[11px] text-white/50 mt-2 leading-snug">{extra}</div> : null}
         </div>
       </div>
     );
@@ -326,7 +334,7 @@
           } catch (err) {
             console.error(err);
             if (!active) return;
-            setFetchError(err?.message || "Error al actualizar datos");
+            setFetchError(friendlyFetchError(err));
           } finally {
             if (!active) return;
             setLoadingQuotes(false);
@@ -399,7 +407,7 @@
             setScannerState((prev) => ({
               ...prev,
               loading: false,
-              error: err?.message || "Error al escanear universo",
+              error: friendlyFetchError(err),
             }));
           }
         };
@@ -777,7 +785,13 @@
               {/* KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
                 <Stat label="Tickers en tabla" value={kpis.total} sub={`de ${kpis.totalAll}`} icon={"📈"} />
-                <Stat label="Auto activos" value={scannerMatches.length} sub={scannerLoading ? "Escaneando..." : (scannerState.lastUpdated ? `Act. ${scannerUpdatedLabel}` : "Sin datos")} icon={"🔎"} />
+                <Stat
+                  label="Auto activos"
+                  value={scannerMatches.length}
+                  sub={scannerLoading ? "Escaneando..." : (scannerState.lastUpdated ? `Act. ${scannerUpdatedLabel}` : "Sin datos")}
+                  extra="Cantidad de tickers detectados por el escáner automático que cumplen todos los filtros actuales."
+                  icon={"🔎"}
+                />
                 <Stat label="Máximo" value={Math.round(kpis.top)} icon={"🎯"} />
                 <Stat label="En juego" value={kpis.inPlay} icon={"⚡"} />
                 <Stat label="Listas 70+" value={kpis.ready70} icon={"🚀"} />
@@ -1079,7 +1093,7 @@
                     <tr className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur">
                       {[
                         "Ticker/Mercado","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC (TTS)","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"
-                      ].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
+                      ].map((h,i)=> (<th key={i} className="px-3 py-1.5 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
                     </tr>
                   </thead>
                   <tbody>
@@ -1090,8 +1104,8 @@
                       const selected = (r.id === selectedId) || (!selectedId && rows.length > 0 && r.id === rows[0].id);
                       return (
                         <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-col gap-1">
+                          <td className="px-3 py-1.5">
+                            <div className="flex flex-col gap-0.5">
                               <input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/>
                               <select value={market} onChange={e=>update(r.id, "market", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs">
                                 {Object.entries(MARKETS).map(([key, m]) => (
@@ -1100,33 +1114,33 @@
                               </select>
                             </div>
                           </td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.close)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.bid)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.ask)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.avgPrice)}</td>
-                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volToday)}</td>
-                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volAvg20)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rvol)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.floatM)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rotation)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.shortPct)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.dtc)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.atr14)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(atrPct)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema9)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema200)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(chgPct)}</td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.spreadPct)}</td>
-                          <td className="px-3 py-2 w-24">
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="tabular-nums">{safeNumber(r.liqM, 1)}</span>
-                              <span className="text-[10px] text-white/60">{info.currency}</span>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.close)}</td>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.bid)}</td>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.ask)}</td>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.avgPrice)}</td>
+                          <td className="px-3 py-1.5 w-28 text-right tabular-nums">{safeInteger(r.volToday)}</td>
+                          <td className="px-3 py-1.5 w-28 text-right tabular-nums">{safeInteger(r.volAvg20)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(rvol)}</td>
+                          <td className="px-3 py-1.5 w-24 text-right tabular-nums">{safeNumber(r.floatM)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(rotation)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safePct(r.shortPct)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(r.dtc)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(r.atr14)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safePct(atrPct)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(r.ema9)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safeNumber(r.ema200)}</td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safePct(chgPct)}</td>
+                          <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
+                          <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
+                          <td className="px-3 py-1.5 w-20 text-right tabular-nums">{safePct(r.spreadPct)}</td>
+                          <td className="px-3 py-1.5 w-24">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <div className="text-right tabular-nums">{safeNumber(r.liqM, 1)} {info.currency}</div>
+                              <div className="text-[10px] text-white/60 uppercase tracking-wide">{info.label}</div>
                             </div>
                           </td>
-                          <td className="px-3 py-2 w-[360px]">
+                          <td className="px-3 py-1.5 w-[360px]">
                             <div className="flex flex-wrap gap-1">
                               <Badge ok={flags.priceOK} label="Precio" />
                               <Badge ok={flags.emaOK} label={"\u003eEMA"} />
@@ -1149,7 +1163,7 @@
                               <div className="flex-1"><ScoreBar value={score || 0} /></div>
                             </div>
                           </td>
-                          <td className="px-3 py-2 align-top">
+                          <td className="px-3 py-1.5 align-top">
                             <textarea value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} rows={2} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs" placeholder="Notas" />
                           </td>
                         </tr>
