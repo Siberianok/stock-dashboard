@@ -1047,27 +1047,27 @@
             <div className="mt-4 text-xs text-white/70 text-center">
               <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
             </div>
-            <div className={`rounded-2xl ${COLORS.glass} mt-6 p-6 shadow-xl`}>
+              <div className={`rounded-2xl ${COLORS.glass} mt-6 p-6 shadow-xl`}>
               <h3 className="text-lg font-semibold text-center">Guía rápida de métricas</h3>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4 text-sm text-white/70">
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-4 text-sm text-white/70">
                 <div>
                   <h4 className="text-white font-semibold text-base mb-2">Precio &amp; Volatilidad</h4>
                   <ul className="space-y-1.5 list-disc list-inside">
                     <li><span className="text-white">Rango de precio:</span> controla los valores mínimo y máximo aceptados para cada mercado.</li>
-                    <li><span className="text-white">%día ≥:</span> porcentaje mínimo de variación respecto de la apertura para considerar la acción en modo momentum.</li>
-                    <li><span className="text-white">ATR ≥:</span> umbral de rango verdadero promedio en moneda local para asegurar movimientos significativos.</li>
-                    <li><span className="text-white">ATR% ≥:</span> versión relativa del ATR sobre el precio de cierre para comparar entre tickers.</li>
+                    <li><span className="text-white">%día ≥:</span> porcentaje mínimo de variación respecto de la apertura; mide aceleración intradía del precio.</li>
+                    <li><span className="text-white">ATR ≥:</span> umbral de rango verdadero promedio en moneda local para asegurar amplitud de movimiento en términos absolutos.</li>
+                    <li><span className="text-white">ATR% ≥:</span> versión relativa del ATR sobre el precio de cierre, estandariza la volatilidad para comparar tickers distintos.</li>
                   </ul>
                 </div>
                 <div>
                   <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Float</h4>
                   <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">RVOL ≥:</span> relación mínima entre el volumen actual y el promedio reciente para validar interés inusual.</li>
-                    <li><span className="text-white">RVOL ideal ≥:</span> objetivo superior de participación respecto del promedio para setups de alta convicción.</li>
-                    <li><span className="text-white">Float &lt; (M):</span> límite máximo de acciones disponibles en millones para privilegiar floats reducidos.</li>
-                    <li><span className="text-white">Pref. Float &lt; (M):</span> umbral preferido aún más exigente para escenarios de squeezes agresivos.</li>
-                    <li><span className="text-white">Rotación ≥:</span> rotación mínima (VolHoy / Float) esperada durante la sesión.</li>
-                    <li><span className="text-white">Rotación ideal ≥:</span> rotación objetivo que marca un flujo excepcional sobre el float.</li>
+                    <li><span className="text-white">RVOL ≥:</span> relación mínima entre el volumen actual y el promedio reciente; confirma que hay volumen anómalo entrando.</li>
+                    <li><span className="text-white">RVOL ideal ≥:</span> objetivo superior de participación respecto del promedio, referencia para los escenarios más fuertes.</li>
+                    <li><span className="text-white">Float &lt; (M):</span> límite máximo de acciones disponibles en millones para privilegiar floats reducidos y susceptibles de squeeze.</li>
+                    <li><span className="text-white">Pref. Float &lt; (M):</span> umbral preferido aún más exigente, típico para plays súper especulativos.</li>
+                    <li><span className="text-white">Rotación ≥:</span> rotación mínima (VolHoy / Float) que debe darse durante la sesión para validar interés genuino.</li>
+                    <li><span className="text-white">Rotación ideal ≥:</span> objetivo de rotación que marca un flujo excepcional sobre el float.</li>
                   </ul>
                 </div>
                 <div>
@@ -1076,6 +1076,18 @@
                     <li><span className="text-white">Liquidez mínima (M):</span> monto mínimo negociado por mercado para asegurar ejecuciones sin slippage excesivo.</li>
                     <li><span className="text-white">Spread ≤ %:</span> tope de diferencia bid/ask permitido para evitar spreads amplios.</li>
                     <li><span className="text-white">Requerir precio &gt; EMA200:</span> check que fuerza a que el precio esté sobre la media de 200 días antes de aprobar.</li>
+                    <li><span className="text-white">Stickers en tabla:</span> insignias verdes/rojas que muestran de un vistazo qué filtros superó cada ticker (precio, RVOL, float, etc.).</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-white font-semibold text-base mb-2">KPIs &amp; Presets clave</h4>
+                  <ul className="space-y-1.5 list-disc list-inside">
+                    <li><span className="text-white">Auto activos:</span> cantidad de tickers que el escáner cargó automáticamente desde el universo con los filtros vigentes.</li>
+                    <li><span className="text-white">Máximo:</span> mejor SCORE registrado en la tabla; sirve como referencia del techo actual del setup.</li>
+                    <li><span className="text-white">En juego:</span> número de tickers con score intermedio que están cerca de cumplir todos los criterios.</li>
+                    <li><span className="text-white">Listas 70+:</span> tickers con SCORE ≥ 70, considerados listos para ejecutar según el checklist.</li>
+                    <li><span className="text-white">Preset Moderado:</span> configura umbrales equilibrados (RVOL≥2, %día≥10, ATR%≥3, etc.) para escenarios momentum estándar.</li>
+                    <li><span className="text-white">Preset Agresivo:</span> sube las exigencias (RVOL≥3, %día≥20, ATR%≥4, float preferido &lt;50M) apuntando a plays parabólicos de alta convicción.</li>
                   </ul>
                 </div>
               </div>
