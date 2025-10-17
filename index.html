@@ -69,6 +69,9 @@
     const MARKETS = {
       US: { label: "EEUU", currency: "USD" },
       AR: { label: "Argentina", currency: "ARS" },
+      BR: { label: "Brasil", currency: "BRL" },
+      EU: { label: "Europa", currency: "EUR" },
+      CN: { label: "China", currency: "CNY" },
     };
 
     function ScoreBar({ value }) {
@@ -121,14 +124,20 @@
       const [fetchError, setFetchError] = useState(null);
 
       const [th, setTh] = useState({
-        marketsEnabled: { US: true, AR: true },
+        marketsEnabled: { US: true, AR: true, BR: true, EU: true, CN: true },
         priceRange: {
           US: { min: 1.5, max: 20 },
           AR: { min: 500, max: 8000 },
+          BR: { min: 2, max: 60 },
+          EU: { min: 2, max: 60 },
+          CN: { min: 3, max: 80 },
         },
         liquidityMin: {
           US: 5,
           AR: 150,
+          BR: 20,
+          EU: 10,
+          CN: 15,
         },
         rvolMin: 2, rvolIdeal: 5,
         atrMin: 0.5, atrPctMin: 3,
@@ -418,6 +427,12 @@
           { ticker: "GGAL.BA", market: "AR" },
           { ticker: "PAMP.BA", market: "AR" },
           { ticker: "YPFD.BA", market: "AR" },
+          { ticker: "PETR4.SA", market: "BR" },
+          { ticker: "ITUB4.SA", market: "BR" },
+          { ticker: "AIR.PA", market: "EU" },
+          { ticker: "SIE.DE", market: "EU" },
+          { ticker: "0700.HK", market: "CN" },
+          { ticker: "601318.SS", market: "CN" },
           { ticker: "BMA", market: "US" },
           { ticker: "CEPU", market: "US" },
           { ticker: "TGS", market: "US" },
