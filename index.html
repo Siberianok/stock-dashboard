@@ -696,7 +696,7 @@
               {/* Precio & Volatilidad */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
                   {Object.entries(MARKETS).map(([key, info]) => {
                     const cfg = th.priceRange?.[key] || {};
                     return (
@@ -768,7 +768,7 @@
               {/* Técnico & Micro */}
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                       <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
@@ -1054,27 +1054,28 @@
                   <h4 className="text-white font-semibold text-base mb-2">Precio &amp; Volatilidad</h4>
                   <ul className="space-y-1.5 list-disc list-inside">
                     <li><span className="text-white">Rango de precio:</span> controla los valores mínimo y máximo aceptados para cada mercado.</li>
-                    <li><span className="text-white">%día:</span> variación desde la apertura; activa el modo parabólico al exigir ≥ 50%.</li>
-                    <li><span className="text-white">ATR / ATR%:</span> mide la amplitud del movimiento diario en valor absoluto y relativo al cierre.</li>
-                    <li><span className="text-white">Spread:</span> diferencia bid/ask como porcentaje del precio para evaluar fricción.</li>
+                    <li><span className="text-white">%día ≥:</span> porcentaje mínimo de variación respecto de la apertura para considerar la acción en modo momentum.</li>
+                    <li><span className="text-white">ATR ≥:</span> umbral de rango verdadero promedio en moneda local para asegurar movimientos significativos.</li>
+                    <li><span className="text-white">ATR% ≥:</span> versión relativa del ATR sobre el precio de cierre para comparar entre tickers.</li>
                   </ul>
                 </div>
                 <div>
-                  <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Flow</h4>
+                  <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Float</h4>
                   <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">RVOL:</span> relación entre el volumen actual y el promedio de 10 días, clave para detectar interés inusual.</li>
-                    <li><span className="text-white">Rotación:</span> porcentaje del float negociado en la sesión (VolHoy / Float).</li>
-                    <li><span className="text-white">Float:</span> acciones disponibles para trading (en millones); valores bajos facilitan squeezes.</li>
-                    <li><span className="text-white">Liquidez:</span> volumen monetario (precio × volumen) que ayuda a dimensionar tamaños de posición.</li>
+                    <li><span className="text-white">RVOL ≥:</span> relación mínima entre el volumen actual y el promedio reciente para validar interés inusual.</li>
+                    <li><span className="text-white">RVOL ideal ≥:</span> objetivo superior de participación respecto del promedio para setups de alta convicción.</li>
+                    <li><span className="text-white">Float &lt; (M):</span> límite máximo de acciones disponibles en millones para privilegiar floats reducidos.</li>
+                    <li><span className="text-white">Pref. Float &lt; (M):</span> umbral preferido aún más exigente para escenarios de squeezes agresivos.</li>
+                    <li><span className="text-white">Rotación ≥:</span> rotación mínima (VolHoy / Float) esperada durante la sesión.</li>
+                    <li><span className="text-white">Rotación ideal ≥:</span> rotación objetivo que marca un flujo excepcional sobre el float.</li>
                   </ul>
                 </div>
                 <div>
                   <h4 className="text-white font-semibold text-base mb-2">Técnico &amp; Micro</h4>
                   <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">EMA9 / EMA200:</span> exige precio por encima de medias clave para confirmar momentum.</li>
-                    <li><span className="text-white">Short% y DTC:</span> muestran la presión de cortos y los días necesarios para cubrir.</li>
-                    <li><span className="text-white">Spread &amp; Liquidez:</span> límites máximos para evitar microestructura desfavorable.</li>
-                    <li><span className="text-white">Catalyst / Intradía OK:</span> campos manuales para registrar drivers cualitativos relevantes.</li>
+                    <li><span className="text-white">Liquidez mínima (M):</span> monto mínimo negociado por mercado para asegurar ejecuciones sin slippage excesivo.</li>
+                    <li><span className="text-white">Spread ≤ %:</span> tope de diferencia bid/ask permitido para evitar spreads amplios.</li>
+                    <li><span className="text-white">Requerir precio &gt; EMA200:</span> check que fuerza a que el precio esté sobre la media de 200 días antes de aprobar.</li>
                   </ul>
                 </div>
               </div>
