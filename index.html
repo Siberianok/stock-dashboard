@@ -71,6 +71,19 @@
       AR: { label: "Argentina", currency: "ARS" },
     };
 
+    const UNIVERSE = {
+      US: [
+        "AAPL","TSLA","NVDA","AMD","MARA","PLTR","SOFI","IONQ","CAVA","AFRM",
+        "RIVN","LCID","AI","UPST","DKNG","SNOW","COIN","SMCI","CRWD","ABNB",
+        "ROKU","SHOP","NET","HOOD","RBLX","PATH","MDB","ZS","TTD","BABA",
+      ],
+      AR: [
+        "GGAL.BA","PAMP.BA","YPFD.BA","BMA.BA","CEPU.BA","TGSU2.BA","ALUA.BA","TXAR.BA","COME.BA","SUPV.BA",
+      ],
+    };
+
+    const REQUIRED_FLAGS = ["priceOK","emaOK","rvol2","chgOK","atrOK","float50","rot1","shortOK","spreadOK","liqOK"];
+
     function ScoreBar({ value }) {
       const v = Math.max(0, Math.min(100, value || 0));
       return (
@@ -92,6 +105,57 @@
         </div>
       </div>
     );
+
+    const extractQuoteFields = (quote) => {
+      if (!quote) return {};
+      const open = toNum(quote.regularMarketOpen);
+      const close = toNum(quote.regularMarketPrice);
+      const volToday = toNum(quote.regularMarketVolume);
+      const volAvg10 = toNum(quote.averageDailyVolume10Day);
+      const volAvg3m = toNum(quote.averageDailyVolume3Month);
+      const floatShares = toNum(quote.floatShares || quote.sharesOutstanding);
+      const shortPct = toNum(quote.shortPercentOfFloat);
+      const sharesShort = toNum(quote.sharesShort);
+      const avgVolForDtc = volAvg10 || volAvg3m;
+      const ask = toNum(quote.ask);
+      const bid = toNum(quote.bid);
+      const dayHigh = toNum(quote.regularMarketDayHigh);
+      const dayLow = toNum(quote.regularMarketDayLow);
+      const atrApprox = (dayHigh && dayLow)
+        ? (dayHigh - dayLow)
+        : undefined;
+      const avgPrice = (dayHigh && dayLow)
+        ? (dayHigh + dayLow) / 2
+        : (typeof open === "number" && typeof close === "number"
+          ? (open + close) / 2
+          : undefined);
+      const spreadPct = (ask && bid && close)
+        ? ((ask - bid) / close) * 100
+        : undefined;
+      const usdLiquidityM = (close && volToday)
+        ? (close * volToday) / 1e6
+        : undefined;
+      const dtc = (typeof sharesShort === "number" && typeof avgVolForDtc === "number" && avgVolForDtc > 0)
+        ? (sharesShort / avgVolForDtc)
+        : undefined;
+      return {
+        open,
+        close,
+        bid,
+        ask,
+        avgPrice,
+        volToday,
+        volAvg20: volAvg10,
+        floatM: typeof floatShares === "number" ? floatShares / 1e6 : undefined,
+        shortPct,
+        dtc,
+        atr14: atrApprox,
+        ema9: toNum(quote.fiftyDayAverage),
+        ema200: toNum(quote.twoHundredDayAverage),
+        spreadPct,
+        liqM: usdLiquidityM,
+      };
+    };
 
     function App() {
       const [chartsAvailable, setChartsAvailable] = useState(!!window.Recharts);
@@ -119,6 +183,8 @@
       const [refreshToken, setRefreshToken] = useState(0);
       const [loadingQuotes, setLoadingQuotes] = useState(false);
       const [fetchError, setFetchError] = useState(null);
+      const [scannerState, setScannerState] = useState({ matches: [], loading: false, error: null, lastUpdated: null });
+      const [scanToken, setScanToken] = useState(0);
 
       const [th, setTh] = useState({
         marketsEnabled: { US: true, AR: true },
@@ -160,6 +226,25 @@
           [market]: enabled,
         },
       }));
+
+      const thresholdsKey = useMemo(() => JSON.stringify({
+        marketsEnabled: th.marketsEnabled,
+        priceRange: th.priceRange,
+        liquidityMin: th.liquidityMin,
+        rvolMin: th.rvolMin,
+        rvolIdeal: th.rvolIdeal,
+        atrMin: th.atrMin,
+        atrPctMin: th.atrPctMin,
+        chgMin: th.chgMin,
+        parabolic50: th.parabolic50,
+        needEMA200: th.needEMA200,
+        float50: th.float50,
+        float10: th.float10,
+        rotationMin: th.rotationMin,
+        rotationIdeal: th.rotationIdeal,
+        shortMin: th.shortMin,
+        spreadMaxPct: th.spreadMaxPct,
+      }), [th]);
 
       // ---------- Filas ----------
       const createRow = (overrides = {}) => ({
@@ -222,53 +307,10 @@
             setRows(prev => prev.map(row => {
               const quote = result[row.ticker];
               if (!quote) return row;
-              const open = toNum(quote.regularMarketOpen);
-              const close = toNum(quote.regularMarketPrice);
-              const volToday = toNum(quote.regularMarketVolume);
-              const volAvg10 = toNum(quote.averageDailyVolume10Day);
-              const volAvg3m = toNum(quote.averageDailyVolume3Month);
-              const floatShares = toNum(quote.floatShares || quote.sharesOutstanding);
-              const shortPct = toNum(quote.shortPercentOfFloat);
-              const sharesShort = toNum(quote.sharesShort);
-              const avgVolForDtc = volAvg10 || volAvg3m;
-              const ask = toNum(quote.ask);
-              const bid = toNum(quote.bid);
-              const dayHigh = toNum(quote.regularMarketDayHigh);
-              const dayLow = toNum(quote.regularMarketDayLow);
-              const atrApprox = (dayHigh && dayLow)
-                ? (dayHigh - dayLow)
-                : undefined;
-              const avgPrice = (dayHigh && dayLow)
-                ? (dayHigh + dayLow) / 2
-                : (typeof open === "number" && typeof close === "number"
-                  ? (open + close) / 2
-                  : undefined);
-              const spreadPct = (ask && bid && close)
-                ? ((ask - bid) / close) * 100
-                : undefined;
-              const usdLiquidityM = (close && volToday)
-                ? (close * volToday) / 1e6
-                : undefined;
-              const dtc = (sharesShort && avgVolForDtc)
-                ? (sharesShort / avgVolForDtc)
-                : undefined;
+              const fields = extractQuoteFields(quote);
               return {
                 ...row,
-                open,
-                close,
-                bid,
-                ask,
-                avgPrice,
-                volToday,
-                volAvg20: volAvg10,
-                floatM: floatShares ? floatShares / 1e6 : undefined,
-                shortPct,
-                dtc,
-                atr14: atrApprox,
-                ema9: toNum(quote.fiftyDayAverage),
-                ema200: toNum(quote.twoHundredDayAverage),
-                spreadPct,
-                liqM: usdLiquidityM,
+                ...fields,
                 lastUpdate: new Date().toISOString(),
               };
             }));
@@ -289,7 +331,86 @@
         };
       }, [tickersKey, refreshToken]);
 
+      useEffect(() => {
+        let active = true;
+        const runScan = async () => {
+          const enabledMarkets = Object.entries(th.marketsEnabled || {}).filter(([, enabled]) => enabled).map(([market]) => market);
+          const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
+          if (!entries.length) {
+            if (!active) return;
+            setScannerState((prev) => ({ ...prev, matches: [], loading: false, error: null, lastUpdated: null }));
+            return;
+          }
+          if (!active) return;
+          setScannerState((prev) => ({ ...prev, loading: true, error: null }));
+          try {
+            const symbolToMarket = Object.fromEntries(entries);
+            const symbols = entries.map(([symbol]) => symbol);
+            const quotes = {};
+            const chunkSize = 25;
+            for (let i = 0; i < symbols.length; i += chunkSize) {
+              if (!active) return;
+              const chunk = symbols.slice(i, i + chunkSize);
+              if (!chunk.length) continue;
+              const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(chunk.join(","))}`);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const json = await response.json();
+              const result = json?.quoteResponse?.result || [];
+              result.forEach((quote) => {
+                if (quote?.symbol) {
+                  quotes[quote.symbol.toUpperCase()] = quote;
+                }
+              });
+            }
+            if (!active) return;
+            const matches = symbols.map((symbol) => {
+              const key = symbol.toUpperCase();
+              const quote = quotes[key];
+              if (!quote) return null;
+              const market = symbolToMarket[key] || "US";
+              const fields = extractQuoteFields(quote);
+              const data = { ticker: key, market, ...fields };
+              const computed = calc(data, market);
+              const flags = computed?.flags || {};
+              const passes = REQUIRED_FLAGS.every((flag) => flags[flag]);
+              if (!passes) return null;
+              return { data, computed };
+            }).filter(Boolean);
+            matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
+            if (!active) return;
+            setScannerState({
+              matches,
+              loading: false,
+              error: null,
+              lastUpdated: new Date().toISOString(),
+            });
+          } catch (err) {
+            console.error(err);
+            if (!active) return;
+            setScannerState((prev) => ({
+              ...prev,
+              loading: false,
+              error: err?.message || "Error al escanear universo",
+            }));
+          }
+        };
+        runScan();
+        const interval = window.setInterval(runScan, 60000);
+        return () => {
+          active = false;
+          window.clearInterval(interval);
+        };
+      }, [thresholdsKey, scanToken]);
+
       const refreshQuotes = () => setRefreshToken(Date.now());
+      const triggerScan = () => setScanToken(Date.now());
+      const applyMatchesToTable = () => {
+        if (!scannerState.matches?.length) return;
+        const next = scannerState.matches.map(({ data }) => createRow({ ...data, lastUpdate: scannerState.lastUpdated }));
+        setRows(next);
+        setSelectedId(next[0]?.id || null);
+        setRefreshToken(Date.now());
+      };
 
       const safePct = (value, digits = 2) => {
         const n = toNum(value);
@@ -311,6 +432,14 @@
         const d = new Date(lastUpdated);
         return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       }, [lastUpdated]);
+      const scannerUpdatedLabel = useMemo(() => {
+        if (!scannerState.lastUpdated) return "Sin datos";
+        const d = new Date(scannerState.lastUpdated);
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }, [scannerState.lastUpdated]);
+      const scannerMatches = scannerState.matches || [];
+      const scannerLoading = !!scannerState.loading;
+      const scannerError = scannerState.error;
 
       // ---------- Cálculo ----------
       const calc = (r, forcedMarket) => {
@@ -514,8 +643,9 @@
               </div>
 
               {/* KPIs */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-                <Stat label="Tickers activos" value={kpis.total} sub={`de ${kpis.totalAll}`} icon={"📈"} />
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
+                <Stat label="Tickers en tabla" value={kpis.total} sub={`de ${kpis.totalAll}`} icon={"📈"} />
+                <Stat label="Auto activos" value={scannerMatches.length} sub={scannerLoading ? "Escaneando..." : (scannerState.lastUpdated ? `Act. ${scannerUpdatedLabel}` : "Sin datos")} icon={"🔎"} />
                 <Stat label="Máximo" value={Math.round(kpis.top)} icon={"🎯"} />
                 <Stat label="En juego" value={kpis.inPlay} icon={"⚡"} />
                 <Stat label="Listas 70+" value={kpis.ready70} icon={"🚀"} />
@@ -707,6 +837,96 @@
               </div>
             </div>
 
+            {/* Scanner automático */}
+            <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl`}>
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
+                <div>
+                  <h3 className="font-semibold">Tickers activos (auto)</h3>
+                  <div className="text-xs text-white/60 mt-0.5">Universo predefinido filtrado en tiempo real según todos los criterios activos.</div>
+                </div>
+                <div className="flex flex-col gap-2 items-end sm:flex-row sm:items-center sm:gap-3">
+                  <div className="text-xs text-white/60">Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : "—"}{scannerLoading ? " · escaneando" : ""}</div>
+                  <div className="flex gap-2">
+                    <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading}>Escanear ahora</button>
+                    <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length}>Cargar en tabla</button>
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 space-y-4">
+                {scannerError ? <div className="text-xs text-rose-300">Error: {scannerError}</div> : null}
+                {scannerLoading && !scannerMatches.length ? <div className="text-sm text-white/70">Buscando coincidencias...</div> : null}
+                {!scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
+                {scannerMatches.length ? (
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {scannerMatches.map(({ data, computed }) => (
+                      <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="text-lg font-semibold text-white">{data.ticker}</div>
+                            <div className="text-[11px] text-white/60">{MARKETS[data.market]?.label || data.market}</div>
+                          </div>
+                          <div className="text-right text-[11px] text-white/60">{MARKETS[data.market]?.currency || ""}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
+                          <div className="flex-1"><ScoreBar value={computed.score || 0} /></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-xs text-white/70">
+                          <div>
+                            <div className="text-white/80 font-medium">Close</div>
+                            <div className="tabular-nums">{safeNumber(data.close)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">%día</div>
+                            <div className="tabular-nums">{safePct(computed.chgPct)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">ATR%</div>
+                            <div className="tabular-nums">{safePct(computed.atrPct)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">RVOL</div>
+                            <div className="tabular-nums">{safeNumber(computed.rvol)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">Rotación</div>
+                            <div className="tabular-nums">{safeNumber(computed.rotation)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">Float (M)</div>
+                            <div className="tabular-nums">{safeNumber(data.floatM)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">Short%</div>
+                            <div className="tabular-nums">{safePct(data.shortPct)}</div>
+                          </div>
+                          <div>
+                            <div className="text-white/80 font-medium">Liquidez (M)</div>
+                            <div className="tabular-nums">{safeNumber(data.liqM, 1)} {MARKETS[data.market]?.currency || ""}</div>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge ok={computed.flags.priceOK} label="Precio" />
+                          <Badge ok={computed.flags.emaOK} label=">EMA" />
+                          <Badge ok={computed.flags.rvol2} label="RVOL≥2" />
+                          <Badge ok={computed.flags.rvol5} label="RVOL≥5" />
+                          <Badge ok={computed.flags.chgOK} label="%día" />
+                          <Badge ok={computed.flags.atrOK} label="ATR" />
+                          <Badge ok={computed.flags.float50} label="Float<50" />
+                          <Badge ok={computed.flags.float10} label="Float<10" />
+                          <Badge ok={computed.flags.rot1} label="Rot≥1x" />
+                          <Badge ok={computed.flags.rot3} label="Rot≥3x" />
+                          <Badge ok={computed.flags.shortOK} label="Short%" />
+                          <Badge ok={computed.flags.spreadOK} label="Spread" />
+                          <Badge ok={computed.flags.liqOK} label={`Liq ${MARKETS[data.market]?.currency || ""}`} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
             {/* Tabla */}
             <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
@@ -811,6 +1031,38 @@
 
             <div className="mt-4 text-xs text-white/70 text-center">
               <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
+            </div>
+            <div className={`rounded-2xl ${COLORS.glass} mt-6 p-6 shadow-xl`}>
+              <h3 className="text-lg font-semibold text-center">Guía rápida de métricas</h3>
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4 text-sm text-white/70">
+                <div>
+                  <h4 className="text-white font-semibold text-base mb-2">Precio &amp; Volatilidad</h4>
+                  <ul className="space-y-1.5 list-disc list-inside">
+                    <li><span className="text-white">Rango de precio:</span> controla los valores mínimo y máximo aceptados para cada mercado.</li>
+                    <li><span className="text-white">%día:</span> variación desde la apertura; activa el modo parabólico al exigir ≥ 50%.</li>
+                    <li><span className="text-white">ATR / ATR%:</span> mide la amplitud del movimiento diario en valor absoluto y relativo al cierre.</li>
+                    <li><span className="text-white">Spread:</span> diferencia bid/ask como porcentaje del precio para evaluar fricción.</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Flow</h4>
+                  <ul className="space-y-1.5 list-disc list-inside">
+                    <li><span className="text-white">RVOL:</span> relación entre el volumen actual y el promedio de 10 días, clave para detectar interés inusual.</li>
+                    <li><span className="text-white">Rotación:</span> porcentaje del float negociado en la sesión (VolHoy / Float).</li>
+                    <li><span className="text-white">Float:</span> acciones disponibles para trading (en millones); valores bajos facilitan squeezes.</li>
+                    <li><span className="text-white">Liquidez:</span> volumen monetario (precio × volumen) que ayuda a dimensionar tamaños de posición.</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-white font-semibold text-base mb-2">Técnico &amp; Micro</h4>
+                  <ul className="space-y-1.5 list-disc list-inside">
+                    <li><span className="text-white">EMA9 / EMA200:</span> exige precio por encima de medias clave para confirmar momentum.</li>
+                    <li><span className="text-white">Short% y DTC:</span> muestran la presión de cortos y los días necesarios para cubrir.</li>
+                    <li><span className="text-white">Spread &amp; Liquidez:</span> límites máximos para evitar microestructura desfavorable.</li>
+                    <li><span className="text-white">Catalyst / Intradía OK:</span> campos manuales para registrar drivers cualitativos relevantes.</li>
+                  </ul>
+                </div>
+              </div>
             </div>
           </div>
       );
