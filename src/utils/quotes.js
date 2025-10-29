@@ -15,14 +15,20 @@ export const extractQuoteFields = (quote) => {
   const bid = toNum(quote.bid);
   const dayHigh = toNum(quote.regularMarketDayHigh);
   const dayLow = toNum(quote.regularMarketDayLow);
-  const atrApprox = dayHigh && dayLow ? dayHigh - dayLow : undefined;
-  const avgPrice = dayHigh && dayLow
+  const atrApprox = typeof dayHigh === 'number' && typeof dayLow === 'number'
+    ? dayHigh - dayLow
+    : undefined;
+  const avgPrice = typeof dayHigh === 'number' && typeof dayLow === 'number'
     ? (dayHigh + dayLow) / 2
     : typeof open === 'number' && typeof close === 'number'
       ? (open + close) / 2
       : undefined;
-  const spreadPct = ask && bid && close ? ((ask - bid) / close) * 100 : undefined;
-  const usdLiquidityM = close && volToday ? (close * volToday) / 1e6 : undefined;
+  const spreadPct = typeof ask === 'number' && typeof bid === 'number' && typeof close === 'number' && close !== 0
+    ? ((ask - bid) / close) * 100
+    : undefined;
+  const usdLiquidityM = typeof close === 'number' && typeof volToday === 'number'
+    ? (close * volToday) / 1e6
+    : undefined;
   const dtc = typeof sharesShort === 'number' && typeof avgVolForDtc === 'number' && avgVolForDtc > 0
     ? sharesShort / avgVolForDtc
     : undefined;

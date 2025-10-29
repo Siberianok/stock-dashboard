@@ -23,6 +23,11 @@ import { useScanner } from './hooks/useScanner.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
 
+const parseNumberInput = (event) => {
+  const { value } = event.target;
+  return value === '' ? undefined : Number(value);
+};
+
 const Badge = ({ ok, label }) => (
   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>
     {label}
@@ -106,14 +111,18 @@ function App() {
         if (!active) return;
         setLoadingQuotes(true);
         setFetchError(null);
-        const quotes = await fetchQuotes(tickers, { force });
+        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force });
         if (!active) return;
+        const staleSet = new Set((staleSymbols || []).map((symbol) => symbol.toUpperCase()));
         setRows((prev) => prev.map((row) => {
-          const quote = quotes[row.ticker];
+          const symbolKey = row.ticker ? row.ticker.toUpperCase() : row.ticker;
+          const quote = symbolKey ? quotes[symbolKey] : undefined;
           if (!quote) return row;
           const fields = extractQuoteFields(quote);
-          return { ...row, ...fields, lastUpdate: new Date().toISOString() };
+          const nextLastUpdate = staleSet.has(symbolKey) ? row.lastUpdate : new Date().toISOString();
+          return { ...row, ...fields, lastUpdate: nextLastUpdate };
         }));
+        setFetchError(quotesError || null);
       } catch (error) {
         console.error(error);
         if (!active) return;
@@ -145,13 +154,22 @@ function App() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }, [lastUpdated]);
 
-  const computedRows = useMemo(() => rows.map((row) => ({
-    row,
-    computed: calc(row, row.market || 'US'),
-    isActive: !!(thresholds.marketsEnabled?.[row.market || 'US']),
-  })), [rows, calc, thresholds.marketsEnabled]);
+  const computedRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        row,
+        computed: calc(row, row.market || 'US'),
+        isActive: thresholds.marketsEnabled?.[row.market || 'US'] !== false,
+      })),
+    [rows, calc, thresholds.marketsEnabled],
+  );
 
   const activeComputed = useMemo(() => computedRows.filter((entry) => entry.isActive), [computedRows]);
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => thresholds.marketsEnabled?.[row.market || 'US'] !== false),
+    [rows, thresholds.marketsEnabled],
+  );
 
   const kpis = useMemo(() => {
     const scores = activeComputed.map((entry) => entry.computed?.score || 0);
@@ -515,11 +533,11 @@ function App() {
                       <div className="text-center text-white/70 text-xs uppercase tracking-wide">{info.label}</div>
                       <label className="flex flex-col gap-1 text-xs">
                         <span className="text-white/80">Mínimo</span>
-                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.min ?? ''} onChange={(e) => updatePriceRange(key, 'min', Number(e.target.value))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
+                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.min ?? ''} onChange={(e) => updatePriceRange(key, 'min', parseNumberInput(e))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
                       </label>
                       <label className="flex flex-col gap-1 text-xs">
                         <span className="text-white/80">Máximo</span>
-                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.max ?? ''} onChange={(e) => updatePriceRange(key, 'max', Number(e.target.value))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
+                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.max ?? ''} onChange={(e) => updatePriceRange(key, 'max', parseNumberInput(e))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
                       </label>
                     </div>
                   ))}
@@ -533,27 +551,123 @@ function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">RVOL ≥</span>
-                    <input type="number" step="0.1" value={thresholds.rvolMin} onChange={(e) => setThresholds((prev) => ({ ...prev, rvolMin: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.rvolMin ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.rvolMin;
+                            return next;
+                          }
+                          return { ...prev, rvolMin: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">RVOL ideal ≥</span>
-                    <input type="number" step="0.1" value={thresholds.rvolIdeal} onChange={(e) => setThresholds((prev) => ({ ...prev, rvolIdeal: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.rvolIdeal ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.rvolIdeal;
+                            return next;
+                          }
+                          return { ...prev, rvolIdeal: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">Float &lt; (M)</span>
-                    <input type="number" step="1" value={thresholds.float50} onChange={(e) => setThresholds((prev) => ({ ...prev, float50: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="1"
+                      value={thresholds.float50 ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.float50;
+                            return next;
+                          }
+                          return { ...prev, float50: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">Pref. Float &lt; (M)</span>
-                    <input type="number" step="1" value={thresholds.float10} onChange={(e) => setThresholds((prev) => ({ ...prev, float10: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="1"
+                      value={thresholds.float10 ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.float10;
+                            return next;
+                          }
+                          return { ...prev, float10: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">Rotación ≥</span>
-                    <input type="number" step="0.1" value={thresholds.rotationMin} onChange={(e) => setThresholds((prev) => ({ ...prev, rotationMin: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.rotationMin ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.rotationMin;
+                            return next;
+                          }
+                          return { ...prev, rotationMin: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">Rotación ideal ≥</span>
-                    <input type="number" step="0.1" value={thresholds.rotationIdeal} onChange={(e) => setThresholds((prev) => ({ ...prev, rotationIdeal: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.rotationIdeal ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.rotationIdeal;
+                            return next;
+                          }
+                          return { ...prev, rotationIdeal: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                 </div>
               </div>
@@ -564,12 +678,28 @@ function App() {
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                       <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
-                      <input type="number" step="0.5" value={thresholds.liquidityMin?.[key] ?? ''} onChange={(e) => updateLiquidityMin(key, Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                      <input type="number" step="0.5" value={thresholds.liquidityMin?.[key] ?? ''} onChange={(e) => updateLiquidityMin(key, parseNumberInput(e))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
                     </label>
                   ))}
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                     <span className="text-white/80 font-medium">Spread ≤ %</span>
-                    <input type="number" step="0.1" value={thresholds.spreadMaxPct} onChange={(e) => setThresholds((prev) => ({ ...prev, spreadMaxPct: Number(e.target.value) }))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.spreadMaxPct ?? ''}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        setThresholds((prev) => {
+                          if (nextValue === undefined) {
+                            const next = { ...prev };
+                            delete next.spreadMaxPct;
+                            return next;
+                          }
+                          return { ...prev, spreadMaxPct: nextValue };
+                        });
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
                   </label>
                   <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
                     <input type="checkbox" checked={thresholds.needEMA200} onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))} />
@@ -729,7 +859,7 @@ function App() {
         </section>
 
         <TickerTable
-          rows={rows}
+          rows={visibleRows}
           thresholds={thresholds}
           selectedId={selectedId}
           onSelect={setSelectedId}
