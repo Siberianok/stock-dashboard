@@ -48,7 +48,9 @@ export const createCalc = (thresholds) => {
     const float10 = typeof floatM === 'number' && floatM < th.float10;
     const rot1 = typeof rotation === 'number' && rotation >= th.rotationMin;
     const rot3 = typeof rotation === 'number' && rotation >= th.rotationIdeal;
-    const shortOK = typeof shortPct === 'number' && shortPct >= th.shortMin;
+    const hasShortPct = typeof shortPct === 'number';
+    const shortOK = hasShortPct && shortPct >= th.shortMin;
+    const shortMissing = !hasShortPct;
     const spreadOK = typeof spreadPct !== 'number' ? true : spreadPct <= th.spreadMaxPct;
     const liqOK = typeof liqM !== 'number' ? true : liqM >= marketLiquidityMin;
 
@@ -67,7 +69,22 @@ export const createCalc = (thresholds) => {
     score += row.intradiaOK ? 5 : 0;
     score += row.catalyst ? 5 : 0;
 
-    const flags = { priceOK, emaOK, rvol2, rvol5, chgOK, atrOK, float50, float10, rot1, rot3, shortOK, spreadOK, liqOK };
+    const flags = {
+      priceOK,
+      emaOK,
+      rvol2,
+      rvol5,
+      chgOK,
+      atrOK,
+      float50,
+      float10,
+      rot1,
+      rot3,
+      shortOK,
+      shortMissing,
+      spreadOK,
+      liqOK,
+    };
     return {
       rvol,
       atrPct,
