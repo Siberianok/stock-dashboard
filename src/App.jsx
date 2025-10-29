@@ -256,9 +256,11 @@ function App() {
   }, [selectedCalc, selectedRow, thresholds]);
 
   const { state: scannerState, triggerScan } = useScanner({ thresholds, calc, thresholdsKey });
-  const scannerMatches = scannerState.matches || [];
+  const scannerMatchesRaw = scannerState.matches || [];
   const scannerLoading = !!scannerState.loading;
   const scannerError = scannerState.error;
+  const scannerResultsStale = !!(scannerState.lastThresholdsKey && scannerState.lastThresholdsKey !== thresholdsKey);
+  const scannerMatches = scannerResultsStale ? [] : scannerMatchesRaw;
 
   const applyMatchesToTable = useCallback(() => {
     if (!scannerMatches.length) return;
@@ -775,7 +777,11 @@ function App() {
               <div className="text-xs text-white/60 mt-0.5">Universo predefinido filtrado en tiempo real según todos los criterios activos.</div>
             </div>
             <div className="flex flex-col gap-2 items-end sm:flex-row sm:items-center sm:gap-3">
-              <div className="text-xs text-white/60">Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : '—'}{scannerLoading ? ' · escaneando' : ''}</div>
+              <div className="text-xs text-white/60">
+                Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : '—'}
+                {scannerLoading ? ' · escaneando' : ''}
+                {scannerResultsStale ? ' · filtros actualizados' : ''}
+              </div>
               <div className="flex gap-2">
                 <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading}>Escanear ahora</button>
                 <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length}>Cargar en tabla</button>
@@ -784,8 +790,9 @@ function App() {
           </div>
           <div className="p-4 space-y-4">
             {scannerError ? <div className="text-xs text-rose-300">Error: {scannerError}</div> : null}
+            {scannerResultsStale ? <div className="text-xs text-amber-200">Esperando resultados con los nuevos filtros…</div> : null}
             {scannerLoading && !scannerMatches.length ? <div className="text-sm text-white/70">Buscando coincidencias...</div> : null}
-            {!scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
+            {!scannerResultsStale && !scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
             {scannerMatches.length ? (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {scannerMatches.map(({ data, computed }) => (

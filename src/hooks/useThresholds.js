@@ -5,7 +5,7 @@ import {
   applyPresetAgresivo,
 } from './thresholdConfig.js';
 
-export const useThresholds = () => {
+export function useThresholds() {
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
 
   const updatePriceRange = useCallback((market, field, value) => {
@@ -105,4 +105,4 @@ export const useThresholds = () => {
     presetModerado,
     presetAgresivo,
   };
-};
+}
