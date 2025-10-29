@@ -9,4 +9,19 @@ Este repo usa **GitHub Pages**. Hay dos formas de publicar:
 
 URL: `https://<usuario>.github.io/<repo>/`
 
+## Desarrollo local
+
+Instalá dependencias y levantá el entorno de desarrollo:
+
+```bash
+npm install
+npm run dev
+```
+
+El build de producción se genera con:
+
+```bash
+npm run build
+```
+
 ## Estructura
