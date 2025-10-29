@@ -106,14 +106,18 @@ function App() {
         if (!active) return;
         setLoadingQuotes(true);
         setFetchError(null);
-        const quotes = await fetchQuotes(tickers, { force });
+        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force });
         if (!active) return;
+        const staleSet = new Set((staleSymbols || []).map((symbol) => symbol.toUpperCase()));
         setRows((prev) => prev.map((row) => {
-          const quote = quotes[row.ticker];
+          const symbolKey = row.ticker ? row.ticker.toUpperCase() : row.ticker;
+          const quote = symbolKey ? quotes[symbolKey] : undefined;
           if (!quote) return row;
           const fields = extractQuoteFields(quote);
-          return { ...row, ...fields, lastUpdate: new Date().toISOString() };
+          const nextLastUpdate = staleSet.has(symbolKey) ? row.lastUpdate : new Date().toISOString();
+          return { ...row, ...fields, lastUpdate: nextLastUpdate };
         }));
+        setFetchError(quotesError || null);
       } catch (error) {
         console.error(error);
         if (!active) return;

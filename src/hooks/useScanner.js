@@ -28,7 +28,7 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
       }
       const symbolToMarket = Object.fromEntries(entries);
       const symbols = entries.map(([symbol]) => symbol);
-      const quotes = await fetchQuotes(symbols, { force: true });
+      const { quotes, error: quotesError } = await fetchQuotes(symbols, { force: true });
       const matches = symbols.map((symbol) => {
         const quote = quotes[symbol];
         if (!quote) return null;
@@ -42,7 +42,7 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         return { data, computed };
       }).filter(Boolean);
       matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
-      setState({ matches, loading: false, error: null, lastUpdated: new Date().toISOString() });
+      setState({ matches, loading: false, error: quotesError || null, lastUpdated: new Date().toISOString() });
     } catch (error) {
       console.error(error);
       setState((prev) => ({ ...prev, loading: false, error: error?.message || 'Error al escanear universo' }));
