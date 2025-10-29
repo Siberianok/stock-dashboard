@@ -23,11 +23,6 @@ import { useScanner } from './hooks/useScanner.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
 
-const parseNumberInput = (event) => {
-  const { value } = event.target;
-  return value === '' ? undefined : Number(value);
-};
-
 const Badge = ({ ok, label }) => (
   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>
     {label}
@@ -45,7 +40,9 @@ const Stat = ({ label, value, sub, icon }) => (
   </div>
 );
 
-const parseNumberInput = (value) => {
+const parseNumberInput = (input) => {
+  const value =
+    input && typeof input === 'object' && 'target' in input ? input.target?.value : input;
   if (value === '' || value === null || value === undefined) return undefined;
   const num = Number(value);
   return Number.isFinite(num) ? num : undefined;
