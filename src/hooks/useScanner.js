@@ -37,7 +37,10 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         const data = { ticker: symbol, market, ...fields };
         const computed = calc(data, market);
         const flags = computed?.flags || {};
-        const passes = REQUIRED_FLAGS.every((flag) => flags[flag]);
+        const passes = REQUIRED_FLAGS.every((flag) => {
+          if (flag === 'shortOK' && flags.shortMissing) return true;
+          return Boolean(flags[flag]);
+        });
         if (!passes) return null;
         return { data, computed };
       }).filter(Boolean);
