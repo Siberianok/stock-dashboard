@@ -24,7 +24,7 @@
   <script type="text/babel"
           data-presets="env,react"
           data-plugins="transform-optional-chaining,transform-nullish-coalescing-operator,transform-object-rest-spread">
-    const { useState, useMemo, useEffect } = React;
+    const { useState, useMemo, useEffect, useCallback } = React;
     const ChartFallback = ({ label }) => (
       <div className="h-full flex items-center justify-center text-xs text-white/60">
         {label} (Recharts no disponible)
@@ -66,6 +66,13 @@
       link: "#38bdf8",
     };
 
+    const STORAGE_KEYS = {
+      thresholds: "selector-thresholds",
+      presets: "selector-presets",
+      universes: "selector-universes",
+      alerts: "selector-alerts",
+    };
+
     const MARKETS = {
       US: { label: "EEUU", currency: "USD" },
       AR: { label: "Argentina", currency: "ARS" },
@@ -74,7 +81,7 @@
       CN: { label: "China", currency: "CNY" },
     };
 
-    const UNIVERSE = {
+    const DEFAULT_UNIVERSE = {
       US: [
         "AAPL","TSLA","NVDA","AMD","MARA","PLTR","SOFI","IONQ","CAVA","AFRM",
         "RIVN","LCID","AI","UPST","DKNG","SNOW","COIN","SMCI","CRWD","ABNB",
@@ -85,7 +92,194 @@
       ],
     };
 
+    const DEFAULT_THRESHOLDS = {
+      marketsEnabled: { US: true, AR: true, BR: true, EU: true, CN: true },
+      priceRange: {
+        US: { min: 1.5, max: 20 },
+        AR: { min: 500, max: 8000 },
+        BR: { min: 2, max: 60 },
+        EU: { min: 2, max: 60 },
+        CN: { min: 3, max: 80 },
+      },
+      liquidityMin: {
+        US: 5,
+        AR: 150,
+        BR: 20,
+        EU: 10,
+        CN: 15,
+      },
+      rvolMin: 2,
+      rvolIdeal: 5,
+      atrMin: 0.5,
+      atrPctMin: 3,
+      chgMin: 10,
+      parabolic50: false,
+      needEMA200: true,
+      float50: 50,
+      float10: 10,
+      rotationMin: 1,
+      rotationIdeal: 3,
+      shortMin: 15,
+      spreadMaxPct: 1.0,
+    };
+
+    const mergeThresholds = (base, override) => {
+      const next = { ...base, ...(override || {}) };
+      next.marketsEnabled = { ...base.marketsEnabled, ...(override?.marketsEnabled || {}) };
+      next.priceRange = Object.keys(MARKETS).reduce((acc, key) => {
+        acc[key] = { ...(base.priceRange?.[key] || {}), ...(override?.priceRange?.[key] || {}) };
+        return acc;
+      }, {});
+      next.liquidityMin = { ...base.liquidityMin, ...(override?.liquidityMin || {}) };
+      return next;
+    };
+
+    const PREDEFINED_PRESETS = {
+      Moderado: {
+        rvolMin: 2,
+        rvolIdeal: 5,
+        chgMin: 10,
+        parabolic50: false,
+        atrMin: 0.5,
+        atrPctMin: 3,
+        needEMA200: true,
+      },
+      Agresivo: {
+        rvolMin: 3,
+        rvolIdeal: 6,
+        chgMin: 20,
+        parabolic50: true,
+        atrMin: 0.6,
+        atrPctMin: 4,
+        needEMA200: true,
+      },
+    };
+
+    const DEFAULT_ALERTS = {
+      enabled: false,
+      minScore: 70,
+      requiredFlags: [],
+      notifyBrowser: false,
+      webhookUrl: "",
+    };
+
+    const loadJSON = (key, fallback) => {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) return fallback;
+        const raw = window.localStorage.getItem(key);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        return parsed ?? fallback;
+      } catch (err) {
+        console.warn("No se pudo leer storage", key, err);
+        return fallback;
+      }
+    };
+
+    const saveJSON = (key, value) => {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) return;
+        window.localStorage.setItem(key, JSON.stringify(value));
+      } catch (err) {
+        console.warn("No se pudo persistir storage", key, err);
+      }
+    };
+
+    const normalizeTicker = (value) => {
+      if (!value) return "";
+      return String(value).trim().toUpperCase();
+    };
+
+    const parseCSVTickers = (text) => {
+      const rows = [];
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      lines.forEach((line, idx) => {
+        const parts = line.split(/[;,\t]/).map(p => p.trim());
+        if (!parts.length) return;
+        const maybeTicker = normalizeTicker(parts[0]);
+        if (!maybeTicker || maybeTicker === "TICKER") return;
+        const maybeMarket = normalizeTicker(parts[1]);
+        const market = MARKETS[maybeMarket] ? maybeMarket : undefined;
+        rows.push({ ticker: maybeTicker, market });
+      });
+      return rows;
+    };
+
+    const parseJSONTickers = (text) => {
+      try {
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) {
+          return data.map((ticker) => ({ ticker: normalizeTicker(ticker) })).filter(x => x.ticker);
+        }
+        if (Array.isArray(data?.tickers)) {
+          return data.tickers.map((ticker) => ({ ticker: normalizeTicker(ticker), market: normalizeTicker(data.market) || undefined })).filter(x => x.ticker);
+        }
+        if (data && typeof data === "object") {
+          const rows = [];
+          Object.entries(data).forEach(([marketKey, list]) => {
+            if (!Array.isArray(list)) return;
+            list.forEach((ticker) => {
+              rows.push({ ticker: normalizeTicker(ticker), market: normalizeTicker(marketKey) });
+            });
+          });
+          return rows.filter(x => x.ticker);
+        }
+      } catch (err) {
+        console.warn("JSON inválido", err);
+      }
+      return [];
+    };
+
+    const formatCSV = (headers, rows) => {
+      const lines = [headers.join(",")];
+      rows.forEach((row) => {
+        lines.push(row.map((cell) => {
+          if (cell === undefined || cell === null) return "";
+          const str = String(cell);
+          if (str.includes(",")) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        }).join(","));
+      });
+      return lines.join("\n");
+    };
+
+    const deepClone = (value) => {
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (err) {
+        return value;
+      }
+    };
+
+    const sanitizeUniverse = (value) => {
+      const base = value && typeof value === "object" ? value : {};
+      const result = {};
+      Object.keys(MARKETS).forEach((key) => {
+        const list = Array.isArray(base[key]) ? base[key] : DEFAULT_UNIVERSE[key] || [];
+        const unique = Array.from(new Set(list.map(normalizeTicker).filter(Boolean)));
+        result[key] = unique;
+      });
+      return result;
+    };
+
     const REQUIRED_FLAGS = ["priceOK","emaOK","rvol2","chgOK","atrOK","float50","rot1","shortOK","spreadOK","liqOK"];
+    const ROW_FIELDS = [
+      "ticker","market","open","close","bid","ask","avgPrice","volToday","volAvg20","floatM","shortPct","dtc","atr14","ema9","ema200","spreadPct","liqM","catalyst","intradiaOK","comments","lastUpdate"
+    ];
+    const FLAG_LABELS = {
+      priceOK: "Precio",
+      emaOK: ">EMA",
+      rvol2: "RVOL≥2",
+      chgOK: "%día",
+      atrOK: "ATR",
+      float50: "Float<50",
+      rot1: "Rot≥1x",
+      shortOK: "Short%",
+      spreadOK: "Spread",
+      liqOK: "Liquidez",
+    };
 
     function ScoreBar({ value }) {
       const v = Math.max(0, Math.min(100, value || 0));
@@ -178,6 +372,11 @@
         PieChart, Pie, Cell,
         RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
         Sankey,
+        Area,
+        Bar,
+        LineChart, Line,
+        CartesianGrid, XAxis, YAxis,
+        ComposedChart,
       } = chartsAvailable ? window.Recharts : {};
       const SankeyComp = (chartsAvailable && Sankey)
         ? Sankey
@@ -189,31 +388,55 @@
       const [scannerState, setScannerState] = useState({ matches: [], loading: false, error: null, lastUpdated: null });
       const [scanToken, setScanToken] = useState(0);
 
-      const [th, setTh] = useState({
-        marketsEnabled: { US: true, AR: true, BR: true, EU: true, CN: true },
-        priceRange: {
-          US: { min: 1.5, max: 20 },
-          AR: { min: 500, max: 8000 },
-          BR: { min: 2, max: 60 },
-          EU: { min: 2, max: 60 },
-          CN: { min: 3, max: 80 },
-        },
-        liquidityMin: {
-          US: 5,
-          AR: 150,
-          BR: 20,
-          EU: 10,
-          CN: 15,
-        },
-        rvolMin: 2, rvolIdeal: 5,
-        atrMin: 0.5, atrPctMin: 3,
-        chgMin: 10, parabolic50: false,
-        needEMA200: true,
-        float50: 50, float10: 10,
-        rotationMin: 1, rotationIdeal: 3,
-        shortMin: 15, spreadMaxPct: 1.0,
+      const [th, setTh] = useState(() => mergeThresholds(DEFAULT_THRESHOLDS, loadJSON(STORAGE_KEYS.thresholds, null)));
+      const [savedPresets, setSavedPresets] = useState(() => {
+        const raw = loadJSON(STORAGE_KEYS.presets, []);
+        if (!Array.isArray(raw)) return [];
+        return raw.map((preset) => ({
+          id: preset.id || uid(),
+          name: preset.name || "Preset",
+          values: mergeThresholds(DEFAULT_THRESHOLDS, preset.values || {}),
+        }));
       });
+      const [presetName, setPresetName] = useState("");
+      const [universe, setUniverse] = useState(() => sanitizeUniverse(loadJSON(STORAGE_KEYS.universes, DEFAULT_UNIVERSE)));
+      const [alertsConfig, setAlertsConfig] = useState(() => ({
+        ...DEFAULT_ALERTS,
+        ...loadJSON(STORAGE_KEYS.alerts, {}),
+      }));
+      const [alertLog, setAlertLog] = useState([]);
+      const triggeredAlertsRef = React.useRef(new Set());
+      const [importMessage, setImportMessage] = useState(null);
+      const [importError, setImportError] = useState(null);
+      const [historyCache, setHistoryCache] = useState({});
+      const [historyLoading, setHistoryLoading] = useState(false);
+      const [historyError, setHistoryError] = useState(null);
+      const [scoreHistory, setScoreHistory] = useState({});
 
+      useEffect(() => {
+        saveJSON(STORAGE_KEYS.thresholds, th);
+      }, [th]);
+      useEffect(() => {
+        saveJSON(STORAGE_KEYS.presets, savedPresets.map((preset) => ({ id: preset.id, name: preset.name, values: preset.values })));
+      }, [savedPresets]);
+      useEffect(() => {
+        saveJSON(STORAGE_KEYS.universes, universe);
+      }, [universe]);
+      useEffect(() => {
+        saveJSON(STORAGE_KEYS.alerts, alertsConfig);
+      }, [alertsConfig]);
+
+      useEffect(() => {
+        if (alertsConfig.notifyBrowser && typeof Notification !== "undefined" && Notification.permission === "default") {
+          Notification.requestPermission().catch(() => {});
+        }
+      }, [alertsConfig.notifyBrowser]);
+
+      useEffect(() => {
+        triggeredAlertsRef.current.clear();
+      }, [alertsConfig.minScore, alertsConfig.enabled, (alertsConfig.requiredFlags || []).join("|")]);
+
+      const applyThresholdPatch = (patch) => setTh(prev => mergeThresholds(prev, patch));
       const updatePriceRange = (market, field, value) => setTh(prev => ({
         ...prev,
         priceRange: {
@@ -236,6 +459,62 @@
         },
       }));
 
+      const handleUniverseTextChange = (market, text) => {
+        const tokens = text.split(/[\s,;\n]+/).map(normalizeTicker).filter(Boolean);
+        const unique = Array.from(new Set(tokens));
+        setUniverse(prev => ({ ...prev, [market]: unique }));
+      };
+
+      const updateAlerts = (patch) => {
+        setAlertsConfig(prev => ({
+          ...prev,
+          ...patch,
+        }));
+      };
+
+      const toggleAlertFlag = (flag, enabled) => {
+        setAlertsConfig(prev => {
+          const current = new Set(prev.requiredFlags || []);
+          if (enabled) current.add(flag);
+          else current.delete(flag);
+          return { ...prev, requiredFlags: Array.from(current) };
+        });
+      };
+
+      const resetAlerts = () => {
+        triggeredAlertsRef.current.clear();
+        setAlertLog([]);
+      };
+
+      const readFileAsText = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(String(ev.target?.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("Error al leer archivo"));
+        reader.readAsText(file);
+      });
+
+      const ingestUniverseEntries = (data) => {
+        const parsed = data && typeof data === "object" ? data : {};
+        const next = { ...universe };
+        let changed = false;
+        Object.entries(parsed).forEach(([market, list]) => {
+          const key = normalizeTicker(market);
+          if (!MARKETS[key]) return;
+          const items = Array.isArray(list) ? list.map(normalizeTicker).filter(Boolean) : [];
+          if (!items.length) return;
+          next[key] = Array.from(new Set(items));
+          changed = true;
+        });
+        if (changed) {
+          setUniverse(next);
+          setImportMessage("Universo actualizado");
+          setImportError(null);
+        } else {
+          setImportError("No se pudo interpretar el archivo de universo");
+          setImportMessage(null);
+        }
+      };
+
       const thresholdsKey = useMemo(() => JSON.stringify({
         marketsEnabled: th.marketsEnabled,
         priceRange: th.priceRange,
@@ -254,6 +533,7 @@
         shortMin: th.shortMin,
         spreadMaxPct: th.spreadMaxPct,
       }), [th]);
+      const universeKey = useMemo(() => JSON.stringify(universe), [universe]);
 
       // ---------- Filas ----------
       const createRow = (overrides = {}) => ({
@@ -286,8 +566,156 @@
       const clearRows = () => {
         setRows([createRow()]);
         setSelectedId(null);
+        setImportMessage(null);
+        setImportError(null);
       };
       const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
+
+      const mapRowsFromBundle = (list) => {
+        const entries = Array.isArray(list) ? list : [];
+        return entries.map((item) => {
+          const overrides = {};
+          ROW_FIELDS.forEach((field) => {
+            if (item[field] === undefined) return;
+            if (field === "ticker") {
+              overrides[field] = normalizeTicker(item[field]);
+            } else if (field === "market") {
+              const m = normalizeTicker(item[field]);
+              overrides[field] = MARKETS[m] ? m : "US";
+            } else {
+              overrides[field] = item[field];
+            }
+          });
+          return createRow(overrides);
+        }).filter(row => row.ticker);
+      };
+
+      const ingestTickerEntries = (entries) => {
+        const clean = (Array.isArray(entries) ? entries : []).map((item) => {
+          if (typeof item === "string") return { ticker: normalizeTicker(item), market: "" };
+          if (Array.isArray(item)) return { ticker: normalizeTicker(item[0]), market: normalizeTicker(item[1]) };
+          return { ticker: normalizeTicker(item?.ticker || item?.symbol), market: normalizeTicker(item?.market) };
+        }).filter(item => item.ticker);
+        const seen = new Set();
+        const unique = clean.filter((item) => {
+          if (seen.has(item.ticker)) return false;
+          seen.add(item.ticker);
+          return true;
+        });
+        if (!unique.length) {
+          setImportError("No se encontraron tickers válidos");
+          setImportMessage(null);
+          return;
+        }
+        const rowsFromFile = unique.map((item) => createRow({ ticker: item.ticker, market: MARKETS[item.market] ? item.market : "US" }));
+        setRows(rowsFromFile);
+        setSelectedId(rowsFromFile[0]?.id || null);
+        setRefreshToken(Date.now());
+        setImportMessage(`Importados ${rowsFromFile.length} tickers`);
+        setImportError(null);
+      };
+
+      const handleImportTickersFile = async (event) => {
+        const file = event.target?.files?.[0];
+        if (event.target) event.target.value = "";
+        if (!file) return;
+        try {
+          const text = await readFileAsText(file);
+          const ext = (file.name.split(".").pop() || "").toLowerCase();
+          let entries = [];
+          if (ext === "json") entries = parseJSONTickers(text);
+          if (!entries.length && ext === "csv") entries = parseCSVTickers(text);
+          if (!entries.length) {
+            entries = parseJSONTickers(text);
+          }
+          if (!entries.length) {
+            entries = parseCSVTickers(text);
+          }
+          if (!entries.length) {
+            setImportError("No se pudieron leer tickers del archivo");
+            setImportMessage(null);
+            return;
+          }
+          ingestTickerEntries(entries);
+        } catch (err) {
+          console.error(err);
+          setImportError("Error al importar tickers");
+          setImportMessage(null);
+        }
+      };
+
+      const handleImportUniverseFile = async (event) => {
+        const file = event.target?.files?.[0];
+        if (event.target) event.target.value = "";
+        if (!file) return;
+        try {
+          const text = await readFileAsText(file);
+          const ext = (file.name.split(".").pop() || "").toLowerCase();
+          if (ext === "json") {
+            const data = JSON.parse(text);
+            ingestUniverseEntries(data);
+          } else {
+            const entries = parseCSVTickers(text);
+            if (!entries.length) throw new Error("Archivo vacío");
+            const grouped = entries.reduce((acc, item) => {
+              const market = MARKETS[item.market] ? item.market : "US";
+              if (!acc[market]) acc[market] = [];
+              acc[market].push(item.ticker);
+              return acc;
+            }, {});
+            ingestUniverseEntries(grouped);
+          }
+        } catch (err) {
+          console.error(err);
+          setImportError("Error al importar universo");
+          setImportMessage(null);
+        }
+      };
+
+      const handleImportBundleFile = async (event) => {
+        const file = event.target?.files?.[0];
+        if (event.target) event.target.value = "";
+        if (!file) return;
+        try {
+          const text = await readFileAsText(file);
+          const data = JSON.parse(text);
+          if (data.thresholds) {
+            setTh(mergeThresholds(DEFAULT_THRESHOLDS, data.thresholds));
+          }
+          if (data.universe) {
+            setUniverse(sanitizeUniverse(data.universe));
+          }
+          if (data.alerts) {
+            const incoming = { ...DEFAULT_ALERTS, ...data.alerts };
+            incoming.requiredFlags = Array.isArray(data.alerts.requiredFlags) ? data.alerts.requiredFlags : [];
+            setAlertsConfig(incoming);
+          }
+          if (Array.isArray(data.presets)) {
+            setSavedPresets(data.presets.map((preset) => ({
+              id: preset.id || uid(),
+              name: preset.name || "Preset",
+              values: mergeThresholds(DEFAULT_THRESHOLDS, preset.values || {}),
+            })));
+          }
+          if (Array.isArray(data.rows)) {
+            const mapped = mapRowsFromBundle(data.rows);
+            if (mapped.length) {
+              setRows(mapped);
+              setSelectedId(mapped[0]?.id || null);
+              setRefreshToken(Date.now());
+            }
+          } else if (typeof data.tableCSV === "string" && data.tableCSV.trim()) {
+            const csvEntries = parseCSVTickers(data.tableCSV);
+            if (csvEntries.length) ingestTickerEntries(csvEntries);
+          }
+          setImportMessage("Configuración importada");
+          setImportError(null);
+        } catch (err) {
+          console.error(err);
+          setImportError("No se pudo importar la configuración");
+          setImportMessage(null);
+        }
+      };
 
       const [selectedId, setSelectedId] = useState(null);
       const tickers = useMemo(() => rows.map(r => r.ticker).filter(Boolean), [rows]);
@@ -344,7 +772,7 @@
         let active = true;
         const runScan = async () => {
           const enabledMarkets = Object.entries(th.marketsEnabled || {}).filter(([, enabled]) => enabled).map(([market]) => market);
-          const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
+          const entries = enabledMarkets.flatMap((market) => (universe[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
           if (!entries.length) {
             if (!active) return;
             setScannerState((prev) => ({ ...prev, matches: [], loading: false, error: null, lastUpdated: null }));
@@ -409,7 +837,7 @@
           active = false;
           window.clearInterval(interval);
         };
-      }, [thresholdsKey, scanToken]);
+      }, [thresholdsKey, scanToken, universeKey]);
 
       const refreshQuotes = () => setRefreshToken(Date.now());
       const triggerScan = () => setScanToken(Date.now());
@@ -451,7 +879,7 @@
       const scannerError = scannerState.error;
 
       // ---------- Cálculo ----------
-      const calc = (r, forcedMarket) => {
+      const calc = useCallback((r, forcedMarket) => {
         const marketKey = forcedMarket || r.market || "US";
         const priceCfg = th.priceRange?.[marketKey] || th.priceRange?.US || {};
         const marketPriceMin = typeof priceCfg.min === "number" ? priceCfg.min : 0;
@@ -502,7 +930,7 @@
 
         const flags = { priceOK, emaOK, rvol2, rvol5, chgOK, atrOK, float50, float10, rot1, rot3, shortOK, spreadOK, liqOK };
         return { rvol, atrPct, chgPct, rotation, score, flags, market: marketKey, priceLimits: { min: marketPriceMin, max: marketPriceMax }, liquidityMin: marketLiquidityMin };
-      };
+      }, [th]);
 
       const computed = useMemo(() => rows.map(r => {
         const market = r.market || "US";
@@ -511,6 +939,71 @@
         return { r, ...result, isActive };
       }), [rows, th]);
       const activeComputed = useMemo(() => computed.filter(x => x.isActive), [computed]);
+      useEffect(() => {
+        setScoreHistory(prev => {
+          const next = { ...prev };
+          let changed = false;
+          const keep = new Set();
+          computed.forEach(({ r, score }) => {
+            const ticker = normalizeTicker(r.ticker);
+            if (!ticker) return;
+            keep.add(ticker);
+            const history = next[ticker] ? [...next[ticker]] : [];
+            const value = typeof score === "number" ? Math.round(score) : 0;
+            const last = history[history.length - 1];
+            if (!last || last.score !== value) {
+              history.push({ time: new Date().toISOString(), score: value });
+              if (history.length > 120) history.shift();
+              next[ticker] = history;
+              changed = true;
+            } else {
+              next[ticker] = history;
+            }
+          });
+          Object.keys(next).forEach((ticker) => {
+            if (!keep.has(ticker)) {
+              delete next[ticker];
+              changed = true;
+            }
+          });
+          return changed ? next : prev;
+        });
+      }, [computed]);
+
+      useEffect(() => {
+        if (!alertsConfig.enabled) return;
+        computed.forEach(({ r, score, flags }) => {
+          const ticker = normalizeTicker(r.ticker);
+          if (!ticker) return;
+          const value = typeof score === "number" ? Math.round(score) : 0;
+          if (value < (alertsConfig.minScore || 0)) return;
+          const required = Array.isArray(alertsConfig.requiredFlags) ? alertsConfig.requiredFlags : [];
+          if (required.length && !required.every(flag => flags?.[flag])) return;
+          const key = `${ticker}-${value}`;
+          if (triggeredAlertsRef.current.has(key)) return;
+          triggeredAlertsRef.current.add(key);
+          const payload = { ticker, market: r.market, score: value, flags, triggeredAt: new Date().toISOString(), lastUpdate: r.lastUpdate };
+          if (alertsConfig.notifyBrowser && typeof Notification !== "undefined" && Notification.permission === "granted") {
+            try {
+              new Notification(`Alerta ${ticker}`, { body: `Score ${value}`, tag: key });
+            } catch (err) {
+              console.warn("No se pudo mostrar notificación", err);
+            }
+          }
+          if (alertsConfig.webhookUrl) {
+            try {
+              fetch(alertsConfig.webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ event: "score-alert", config: { ...alertsConfig, webhookUrl: undefined }, payload }),
+              }).catch((err) => console.warn("Webhook error", err));
+            } catch (err) {
+              console.warn("No se pudo disparar webhook", err);
+            }
+          }
+          setAlertLog(prev => [{ id: uid(), ...payload }, ...prev].slice(0, 20));
+        });
+      }, [alertsConfig, computed]);
       const kpis = useMemo(() => {
         const scores = activeComputed.map(x => x.score || 0);
         const top = scores.length ? Math.max.apply(null, scores) : 0;
@@ -520,27 +1013,77 @@
       }, [activeComputed, rows.length]);
 
       // Presets / ordenar / export
-      const setPresetModerado = () => setTh({ ...th, rvolMin: 2, rvolIdeal: 5, chgMin: 10, parabolic50: false, atrMin: 0.5, atrPctMin: 3, needEMA200: true });
-      const setPresetAgresivo = () => setTh({ ...th, rvolMin: 3, rvolIdeal: 6, chgMin: 20, parabolic50: true, atrMin: 0.6, atrPctMin: 4, needEMA200: true });
+      const setPresetModerado = () => applyThresholdPatch(PREDEFINED_PRESETS.Moderado);
+      const setPresetAgresivo = () => applyThresholdPatch(PREDEFINED_PRESETS.Agresivo);
+      const saveCurrentPreset = () => {
+        const name = presetName.trim();
+        if (!name) {
+          setImportError("Elegí un nombre para guardar el preset");
+          setImportMessage(null);
+          return;
+        }
+        const snapshot = deepClone(th);
+        let message = "";
+        const lower = name.toLowerCase();
+        setSavedPresets(prev => {
+          const exists = prev.some(p => p.name.toLowerCase() === lower);
+          if (exists) {
+            message = `Preset actualizado: ${name}`;
+            return prev.map(p => p.name.toLowerCase() === lower ? { ...p, values: snapshot } : p);
+          }
+          message = `Preset guardado: ${name}`;
+          return [...prev, { id: uid(), name, values: snapshot }];
+        });
+        setPresetName("");
+        setImportMessage(message);
+        setImportError(null);
+      };
+      const applySavedPreset = (preset) => {
+        if (!preset) return;
+        setTh(mergeThresholds(DEFAULT_THRESHOLDS, preset.values || {}));
+        setImportMessage(`Preset aplicado: ${preset.name}`);
+        setImportError(null);
+      };
+      const deletePreset = (id) => {
+        setSavedPresets(prev => prev.filter(p => p.id !== id));
+      };
       const sortByScore = () => setRows(prev => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
-      const exportCSV = () => {
+      const exportBundle = () => {
         const headers = [
           "Ticker","Mercado","Moneda","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","SCORE","priceOK","emaOK","rvol2","rvol5","chgOK","atrOK","float<50","float<10","rot≥1","rot≥3","shortOK","spreadOK","liqOK"
         ];
-        const lines = [headers.join(",")];
-        rows.forEach(r => {
+        const rowsForCsv = rows.map(r => {
           const market = r.market || "US";
           const info = MARKETS[market] || MARKETS.US;
           const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
-          lines.push([
+          return [
             r.ticker, info.label, info.currency, r.open, r.close, r.bid, r.ask, r.avgPrice, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
             flags.priceOK, flags.emaOK, flags.rvol2, flags.rvol5, flags.chgOK, flags.atrOK, flags.float50, flags.float10, flags.rot1, flags.rot3, flags.shortOK, flags.spreadOK, flags.liqOK
-          ].join(","));
+          ];
         });
-        const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const tableCSV = formatCSV(headers, rowsForCsv);
+        const bundle = {
+          version: "1.0.0",
+          generatedAt: new Date().toISOString(),
+          thresholds: th,
+          universe,
+          presets: savedPresets,
+          alerts: alertsConfig,
+          rows: rows.map(r => {
+            const data = {};
+            ROW_FIELDS.forEach((field) => {
+              if (r[field] !== undefined) data[field] = r[field];
+            });
+            return data;
+          }),
+          tableCSV,
+        };
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "selector_parabolicas.csv"; a.click();
+        a.href = url;
+        a.download = "selector_parabolicas_bundle.json";
+        a.click();
         URL.revokeObjectURL(url);
       };
 
@@ -735,6 +1278,49 @@
         return found ? found : rows[0];
       }, [selectedId, rows]);
       const selectedCalc = useMemo(() => (selectedRow ? calc(selectedRow, selectedRow.market) : null), [selectedRow, th]);
+      const selectedTicker = selectedRow?.ticker ? normalizeTicker(selectedRow.ticker) : null;
+      const selectedHistory = selectedTicker ? historyCache[selectedTicker] : null;
+      useEffect(() => {
+        if (selectedTicker) setHistoryError(null);
+      }, [selectedTicker]);
+      useEffect(() => {
+        if (!selectedTicker || selectedHistory || !chartsAvailable) return;
+        let cancelled = false;
+        const fetchHistory = async () => {
+          setHistoryLoading(true);
+          setHistoryError(null);
+          try {
+            const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(selectedTicker)}?range=1mo&interval=1d`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const json = await response.json();
+            const result = json?.chart?.result?.[0];
+            const timestamps = result?.timestamp || [];
+            const quote = result?.indicators?.quote?.[0] || {};
+            const closes = quote.close || [];
+            const volumes = quote.volume || [];
+            const points = timestamps.map((ts, idx) => {
+              const close = closes[idx];
+              if (close === null || close === undefined) return null;
+              const date = new Date(ts * 1000);
+              return {
+                date: date.toISOString().slice(0, 10),
+                close,
+                volume: volumes[idx] || 0,
+              };
+            }).filter(Boolean);
+            if (!cancelled) {
+              setHistoryCache(prev => ({ ...prev, [selectedTicker]: points }));
+            }
+          } catch (err) {
+            console.error(err);
+            if (!cancelled) setHistoryError(err?.message || "Error al cargar historial");
+          } finally {
+            if (!cancelled) setHistoryLoading(false);
+          }
+        };
+        fetchHistory();
+        return () => { cancelled = true; };
+      }, [selectedTicker, selectedHistory, chartsAvailable]);
       const radarData = useMemo(() => {
         if (!selectedCalc) return [];
         const r = selectedCalc;
@@ -789,8 +1375,43 @@
                 <button onClick={setPresetAgresivo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Preset: Agresivo</button>
                 <button onClick={sortByScore} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition">Ordenar por SCORE</button>
                 <button onClick={seedDemo} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Test aleatorio</button>
-                <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar CSV</button>
+                <button onClick={exportBundle} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow hover:from-sky-400 hover:to-indigo-500 transition">Exportar bundle</button>
               </div>
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs sm:text-sm">
+                <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">
+                  <span>Importar tickers CSV/JSON</span>
+                  <input type="file" accept=".csv,.json" onChange={handleImportTickersFile} className="hidden" />
+                </label>
+                <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">
+                  <span>Importar bundle (.json)</span>
+                  <input type="file" accept=".json" onChange={handleImportBundleFile} className="hidden" />
+                </label>
+                <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">
+                  <span>Importar universo</span>
+                  <input type="file" accept=".csv,.json" onChange={handleImportUniverseFile} className="hidden" />
+                </label>
+                <button onClick={clearRows} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition">Limpiar tabla</button>
+              </div>
+              {(importMessage || importError) && (
+                <div className="mt-2 text-center text-sm">
+                  {importMessage ? <span className="text-emerald-300">{importMessage}</span> : null}
+                  {importError ? <span className="text-rose-300 block">{importError}</span> : null}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+                <input value={presetName} onChange={e=>setPresetName(e.target.value)} placeholder="Nombre de preset" className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 text-sm" />
+                <button onClick={saveCurrentPreset} className="px-3 py-1.5 rounded-xl bg-emerald-500/90 hover:bg-emerald-400 text-white text-sm">Guardar preset actual</button>
+              </div>
+              {savedPresets.length > 0 && (
+                <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs sm:text-sm">
+                  {savedPresets.map((preset) => (
+                    <div key={preset.id} className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 ring-1 ring-white/15">
+                      <button onClick={() => applySavedPreset(preset)} className="hover:text-emerald-300 transition">{preset.name}</button>
+                      <button onClick={() => deletePreset(preset.id)} className="text-rose-300 hover:text-rose-200 transition" title="Eliminar">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mt-6 text-center">
                 <div className="text-sm font-medium text-white/80">Mercados a escanear</div>
                 <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
@@ -904,6 +1525,80 @@
               </div>
             </div>
 
+            <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl mt-6`}>
+              <h3 className="font-semibold text-center text-lg tracking-wide">Universo configurable</h3>
+              <p className="text-sm text-white/70 text-center mt-2">Editá o pegá tus listas por mercado. Un ticker por línea, se sincroniza con el escaneo automático.</p>
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                {Object.entries(MARKETS).map(([key, info]) => (
+                  <div key={key} className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/80 font-medium">{info.label}</span>
+                      <span className="text-xs text-white/50">{(universe[key] || []).length} tickers</span>
+                    </div>
+                    <textarea value={(universe[key] || []).join("\n")} onChange={e=>handleUniverseTextChange(key, e.target.value)} rows={5} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs" placeholder="Ej: TICKER" />
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-white/60 mt-3">Tip: importá CSV/JSON para actualizar múltiples mercados rápido. La tabla sólo escanea los mercados activos en el header.</div>
+            </div>
+
+            <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl mt-6`}>
+              <h3 className="font-semibold text-center text-lg tracking-wide">Alertas automáticas</h3>
+              <p className="text-sm text-white/70 text-center mt-2">Configura avisos cuando un ticker cumpla score mínimo y flags específicos. Podés usar notificaciones del navegador o webhooks.</p>
+              <div className="grid md:grid-cols-2 gap-4 mt-4 text-sm">
+                <label className="flex items-center gap-2 justify-center md:justify-start">
+                  <input type="checkbox" checked={!!alertsConfig.enabled} onChange={e=>updateAlerts({ enabled: e.target.checked })} />
+                  <span>Activar alertas en vivo</span>
+                </label>
+                <label className="flex flex-col gap-1 items-center md:items-start">
+                  <span className="text-xs uppercase tracking-wide text-white/60">Score mínimo</span>
+                  <input type="number" value={alertsConfig.minScore ?? 70} onChange={e=>updateAlerts({ minScore: Number(e.target.value) })} className="w-32 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                </label>
+                <label className="flex items-center gap-2 justify-center md:justify-start">
+                  <input type="checkbox" checked={!!alertsConfig.notifyBrowser} onChange={e=>updateAlerts({ notifyBrowser: e.target.checked })} />
+                  <span>Notificar en el navegador</span>
+                </label>
+                <label className="flex flex-col gap-1 items-center md:items-start">
+                  <span className="text-xs uppercase tracking-wide text-white/60">Webhook (POST JSON)</span>
+                  <input type="url" value={alertsConfig.webhookUrl || ""} onChange={e=>updateAlerts({ webhookUrl: e.target.value })} placeholder="https://mi-endpoint" className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
+                </label>
+              </div>
+              <div className="mt-4">
+                <div className="text-xs text-white/60 mb-2 text-center md:text-left">Flags requeridos (opcional)</div>
+                <div className="flex flex-wrap gap-2 justify-center md:justify-start">
+                  {REQUIRED_FLAGS.map((flag) => (
+                    <label key={flag} className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 ring-1 ring-white/15 text-xs">
+                      <input type="checkbox" checked={alertsConfig.requiredFlags?.includes(flag)} onChange={e=>toggleAlertFlag(flag, e.target.checked)} />
+                      <span>{FLAG_LABELS[flag] || flag}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs text-white/60">
+                <div>Historial reciente ({alertLog.length})</div>
+                <button onClick={resetAlerts} className="self-center md:self-auto px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition text-white/80">Resetear alertas</button>
+              </div>
+              <div className="mt-2 grid md:grid-cols-2 gap-2 text-xs text-white/70 max-h-48 overflow-auto pr-1">
+                {alertLog.length ? alertLog.map((item) => (
+                  <div key={item.id} className="border border-white/10 rounded-lg px-3 py-2 bg-white/5">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-white">{item.ticker}</span>
+                      <span className="text-[10px] text-white/50">{new Date(item.triggeredAt).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="text-[11px] text-white/60">Score {item.score} · {MARKETS[item.market]?.label || item.market}</div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {Object.entries(item.flags || {}).filter(([, ok]) => ok).map(([flag]) => (
+                        <span key={`${item.id}-${flag}`} className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 text-[10px]">{FLAG_LABELS[flag] || flag}</span>
+                      ))}
+                    </div>
+                  </div>
+                )) : <div className="text-white/50">Sin alertas disparadas todavía.</div>}
+              </div>
+              {alertsConfig.notifyBrowser && typeof Notification !== "undefined" && Notification.permission === "denied" ? (
+                <div className="mt-2 text-xs text-rose-300 text-center">El navegador bloqueó las notificaciones. Habilitalas manualmente para recibir avisos.</div>
+              ) : null}
+            </div>
+
             {/* Charts */}
             <div className="grid md:grid-cols-3 gap-4 mt-6">
               {/* Donut */}
@@ -966,6 +1661,62 @@
                   )}
                 </div>
                 <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para seleccionarlo.</div>
+              </div>
+
+              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                <h3 className="font-semibold text-center mb-3">Histórico precio/volumen</h3>
+                <div className="text-xs text-white/60 text-center -mt-1 mb-2">{selectedTicker ? `Ticker: ${selectedTicker}` : "Seleccioná un ticker de la tabla"}</div>
+                <div className="h-56">
+                  {chartsAvailable ? (
+                    historyLoading && !selectedHistory ? (
+                      <ChartFallback label="Cargando datos" />
+                    ) : selectedHistory && selectedHistory.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={selectedHistory} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                          <XAxis dataKey="date" tick={{ fill: "rgba(226,232,240,0.6)", fontSize: 10 }} interval="preserveStartEnd" hide />
+                          <YAxis yAxisId="price" stroke="#38bdf8" width={45} domain={[dataMin => dataMin * 0.95, dataMax => dataMax * 1.05]} tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 10 }} />
+                          <YAxis yAxisId="volume" orientation="right" hide />
+                          <Tooltip labelFormatter={(label) => label} formatter={(value, name) => (name === "close" ? [fmt(value,2), "Precio"] : [safeInteger(value), "Volumen"])} />
+                          <Area yAxisId="price" type="monotone" dataKey="close" stroke="#38bdf8" fill="rgba(56,189,248,0.25)" strokeWidth={2} />
+                          <Bar yAxisId="volume" dataKey="volume" fill="rgba(248,113,113,0.35)" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : historyError ? (
+                      <ChartFallback label="Error al cargar historial" />
+                    ) : (
+                      <ChartFallback label="Sin historial" />
+                    )
+                  ) : (
+                    <ChartFallback label="Histórico" />
+                  )}
+                </div>
+                <div className="mt-2 text-xs text-white/70 text-center">Rango 1M / 1D desde Yahoo Finance.</div>
+              </div>
+
+              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                <h3 className="font-semibold text-center mb-3">Timeline SCORE</h3>
+                <div className="text-xs text-white/60 text-center -mt-1 mb-2">{selectedTicker ? `Ticker: ${selectedTicker}` : "Seleccioná un ticker de la tabla"}</div>
+                <div className="h-56">
+                  {chartsAvailable ? (
+                    selectedTicker && scoreHistory[selectedTicker]?.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={scoreHistory[selectedTicker]} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                          <XAxis dataKey="time" tick={false} />
+                          <YAxis domain={[0, 100]} tick={{ fill: "rgba(226,232,240,0.7)", fontSize: 10 }} />
+                          <Tooltip labelFormatter={(value) => new Date(value).toLocaleTimeString()} formatter={(value) => [value, "Score"]} />
+                          <Line type="monotone" dataKey="score" stroke="#22d3ee" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <ChartFallback label="Aún sin lecturas" />
+                    )
+                  ) : (
+                    <ChartFallback label="Timeline" />
+                  )}
+                </div>
+                <div className="mt-2 text-xs text-white/70 text-center">Se alimenta de cada actualización de la tabla.</div>
               </div>
             </div>
 
