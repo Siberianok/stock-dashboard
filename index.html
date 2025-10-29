@@ -31,6 +31,35 @@
       </div>
     );
 
+    const Spinner = ({ size = 18, className = "" }) => (
+      <svg
+        className={`animate-spin text-emerald-400 ${className}`}
+        style={{ width: size, height: size }}
+        viewBox="0 0 24 24"
+        fill="none"
+      >
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        />
+        <path
+          className="opacity-75"
+          d="M4 12a8 8 0 018-8"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+
+    const SkeletonBlock = ({ className = "" }) => (
+      <div className={`animate-pulse bg-white/10 rounded ${className}`} />
+    );
+
     // ------------ Utils -------------
     const fmt = (n, d = 2) => (typeof n === "number" && isFinite(n) ? n.toFixed(d) : "");
     const safeNumber = (value, digits = 2) => {
@@ -213,6 +242,55 @@
         rotationMin: 1, rotationIdeal: 3,
         shortMin: 15, spreadMaxPct: 1.0,
       });
+      const [thresholdPanelOpen, setThresholdPanelOpen] = useState({ price: true, volume: true, micro: false });
+      const toggleThresholdPanel = (key) => setThresholdPanelOpen(prev => ({ ...prev, [key]: !prev[key] }));
+
+      const [tableSearch, setTableSearch] = useState("");
+      const [tableMarketFilter, setTableMarketFilter] = useState("ALL");
+      const [tableScoreMin, setTableScoreMin] = useState(0);
+      const [tableOnlyQualified, setTableOnlyQualified] = useState(false);
+      const [tableSortKey, setTableSortKey] = useState("score");
+      const [tableSortDir, setTableSortDir] = useState("desc");
+
+      const ThresholdPanel = ({ id, title, icon, children }) => {
+        const isOpen = !!thresholdPanelOpen[id];
+        return (
+          <div className={`rounded-2xl ${COLORS.glass} shadow-xl overflow-hidden`}>
+            <button
+              onClick={() => toggleThresholdPanel(id)}
+              className="w-full flex items-center justify-between gap-3 px-5 py-3 text-left font-semibold tracking-wide text-lg bg-white/5 hover:bg-white/10 transition"
+            >
+              <span className="flex items-center gap-2">
+                <span>{icon}</span>
+                <span>{title}</span>
+              </span>
+              <svg
+                className={`w-5 h-5 transition-transform ${isOpen ? "rotate-180" : "rotate-0"}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {isOpen ? (
+              <div className="px-5 pb-5 pt-4 border-t border-white/10">
+                {children}
+              </div>
+            ) : null}
+          </div>
+        );
+      };
+
+      const resetTableFilters = () => {
+        setTableSearch("");
+        setTableMarketFilter("ALL");
+        setTableScoreMin(0);
+        setTableOnlyQualified(false);
+        setTableSortKey("score");
+        setTableSortDir("desc");
+      };
 
       const updatePriceRange = (market, field, value) => setTh(prev => ({
         ...prev,
@@ -292,6 +370,7 @@
       const [selectedId, setSelectedId] = useState(null);
       const tickers = useMemo(() => rows.map(r => r.ticker).filter(Boolean), [rows]);
       const tickersKey = tickers.join(",");
+      const fallbackSelectedId = useMemo(() => selectedId || (rows[0]?.id ?? null), [selectedId, rows]);
 
       useEffect(() => {
         if (!tickersKey) {
@@ -511,6 +590,53 @@
         return { r, ...result, isActive };
       }), [rows, th]);
       const activeComputed = useMemo(() => computed.filter(x => x.isActive), [computed]);
+      const filteredComputed = useMemo(() => {
+        const search = tableSearch.trim().toLowerCase();
+        const minScore = Number(tableScoreMin) || 0;
+        const filtered = computed.filter(item => {
+          const ticker = (item.r.ticker || "").toLowerCase();
+          if (search && !ticker.includes(search)) return false;
+          if (tableMarketFilter !== "ALL" && (item.r.market || item.market) !== tableMarketFilter) return false;
+          if (minScore > 0 && (item.score || 0) < minScore) return false;
+          if (tableOnlyQualified && !REQUIRED_FLAGS.every(flag => item.flags?.[flag])) return false;
+          return true;
+        });
+        const sortKey = tableSortKey;
+        const direction = tableSortDir === "asc" ? 1 : -1;
+        const getValue = (item) => {
+          switch (sortKey) {
+            case "ticker":
+              return (item.r.ticker || "").toLowerCase();
+            case "market":
+              return (item.r.market || item.market || "").toLowerCase();
+            case "price":
+              return toNum(item.r.close) ?? -Infinity;
+            case "change":
+              return item.chgPct ?? -Infinity;
+            case "rvol":
+              return item.rvol ?? -Infinity;
+            case "float":
+              return toNum(item.r.floatM) ?? Infinity;
+            case "liq":
+              return toNum(item.r.liqM) ?? -Infinity;
+            case "rotation":
+              return item.rotation ?? -Infinity;
+            case "score":
+            default:
+              return item.score ?? -Infinity;
+          }
+        };
+        const sorted = [...filtered].sort((a, b) => {
+          const va = getValue(a);
+          const vb = getValue(b);
+          if (va === vb) return 0;
+          if (typeof va === "string" && typeof vb === "string") {
+            return va.localeCompare(vb) * direction;
+          }
+          return ((va ?? -Infinity) < (vb ?? -Infinity) ? -1 : 1) * direction;
+        });
+        return sorted;
+      }, [computed, tableSearch, tableMarketFilter, tableScoreMin, tableOnlyQualified, tableSortKey, tableSortDir]);
       const kpis = useMemo(() => {
         const scores = activeComputed.map(x => x.score || 0);
         const top = scores.length ? Math.max.apply(null, scores) : 0;
@@ -777,7 +903,16 @@
               {/* KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
                 <Stat label="Tickers en tabla" value={kpis.total} sub={`de ${kpis.totalAll}`} icon={"📈"} />
-                <Stat label="Auto activos" value={scannerMatches.length} sub={scannerLoading ? "Escaneando..." : (scannerState.lastUpdated ? `Act. ${scannerUpdatedLabel}` : "Sin datos")} icon={"🔎"} />
+                <Stat
+                  label="Auto activos"
+                  value={scannerMatches.length}
+                  sub={scannerLoading ? (
+                    <span className="flex items-center justify-center gap-1">
+                      <Spinner size={14} /> Escaneando...
+                    </span>
+                  ) : (scannerState.lastUpdated ? `Act. ${scannerUpdatedLabel}` : "Sin datos")}
+                  icon={"🔎"}
+                />
                 <Stat label="Máximo" value={Math.round(kpis.top)} icon={"🎯"} />
                 <Stat label="En juego" value={kpis.inPlay} icon={"⚡"} />
                 <Stat label="Listas 70+" value={kpis.ready70} icon={"🚀"} />
@@ -807,408 +942,516 @@
             </div>
           </div>
 
+
           {/* Paneles de umbrales */}
           <div className="max-w-[1200px] mx-auto px-4 pb-10">
-            <div className="grid md:grid-cols-3 gap-4 mt-6">
-              {/* Precio & Volatilidad */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio & Volatilidad</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  {Object.entries(MARKETS).map(([key, info]) => {
-                    const cfg = th.priceRange?.[key] || {};
-                    return (
-                      <div key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-3">
-                        <span className="text-white/80 font-medium">{info.label} ({info.currency})</span>
-                        <div className="grid grid-cols-2 gap-3 w-full">
-                          <label className="flex flex-col items-center gap-1">
-                            <span className="text-[11px] uppercase tracking-wide text-white/60">Mínimo</span>
-                            <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                          </label>
-                          <label className="flex flex-col items-center gap-1">
-                            <span className="text-[11px] uppercase tracking-wide text-white/60">Máximo</span>
-                            <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                          </label>
+            <div className="md:grid md:grid-cols-[320px,1fr] md:gap-6 mt-6 items-start">
+              <aside className="space-y-4 md:sticky md:top-6">
+                <ThresholdPanel id="price" title="Precio & Volatilidad" icon="💲">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
+                    {Object.entries(MARKETS).map(([key, info]) => {
+                      const cfg = th.priceRange?.[key] || {};
+                            return (
+                        <div key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-3">
+                          <span className="text-white/80 font-medium">{info.label} ({info.currency})</span>
+                          <div className="grid grid-cols-2 gap-3 w-full">
+                            <label className="flex flex-col items-center gap-1">
+                              <span className="text-[11px] uppercase tracking-wide text-white/60">Mínimo</span>
+                                <input type="number" step="0.05" value={cfg.min ?? ""} onChange={e=>updatePriceRange(key, "min", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                            </label>
+                            <label className="flex flex-col items-center gap-1">
+                              <span className="text-[11px] uppercase tracking-wide text-white/60">Máximo</span>
+                                <input type="number" step="0.05" value={cfg.max ?? ""} onChange={e=>updatePriceRange(key, "max", Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                            </label>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">ATR ≥ (moneda local)</span>
-                    <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">ATR% ≥</span>
-                    <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="sm:col-span-2 w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">%día ≥</span>
-                    <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
-                    <span>Modo parabólico (≥ 50%)</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Volumen & Float */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">RVOL ≥</span>
-                    <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">RVOL ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Pref. Float &lt; (M)</span>
-                    <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Rotación ≥</span>
-                    <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Rotación ideal ≥</span>
-                    <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                </div>
-              </div>
-
-              {/* Técnico & Micro */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
-                      <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                      );
+                    })}
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">ATR ≥ (moneda local)</span>
+                      <input type="number" step="0.05" value={th.atrMin} onChange={e=>setTh({...th, atrMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                     </label>
-                  ))}
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Spread ≤ %</span>
-                    <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
-                  </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input type="checkbox" checked={th.needEMA200} onChange={e=>setTh({...th, needEMA200: e.target.checked})}/>
-                    <span>Requerir precio &gt; EMA200</span>
-                  </label>
-                </div>
-              </div>
-            </div>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">ATR% ≥</span>
+                      <input type="number" step="0.1" value={th.atrPctMin} onChange={e=>setTh({...th, atrPctMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="sm:col-span-2 w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">%día ≥</span>
+                      <input type="number" step="1" value={th.chgMin} onChange={e=>setTh({...th, chgMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
+                      <input type="checkbox" checked={th.parabolic50} onChange={e=>setTh({...th, parabolic50: e.target.checked})}/>
+                      <span>Modo parabólico (≥ 50%)</span>
+                    </label>
+                  </div>
+                </ThresholdPanel>
 
-            {/* Charts */}
-            <div className="grid md:grid-cols-3 gap-4 mt-6">
-              {/* Donut */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px] relative`}>
-                <h3 className="font-semibold text-center mb-3">Distribución de SCORE</h3>
-                <div className="h-56">
-                  {chartsAvailable ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Tooltip formatter={(v, n)=>[v, n]} />
-                        <Pie data={scoreBuckets} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                          {scoreBuckets.map((e, i) => (<Cell key={`c-${i}`} fill={e.color} />))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <ChartFallback label="Distribución" />
-                  )}
+                <ThresholdPanel id="volume" title="Volumen & Float" icon="📊">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">RVOL ≥</span>
+                      <input type="number" step="0.1" value={th.rvolMin} onChange={e=>setTh({...th, rvolMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">RVOL ideal ≥</span>
+                      <input type="number" step="0.1" value={th.rvolIdeal} onChange={e=>setTh({...th, rvolIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Float &lt; (M)</span>
+                      <input type="number" step="1" value={th.float50} onChange={e=>setTh({...th, float50: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Pref. Float &lt; (M)</span>
+                      <input type="number" step="1" value={th.float10} onChange={e=>setTh({...th, float10: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Rotación ≥</span>
+                      <input type="number" step="0.1" value={th.rotationMin} onChange={e=>setTh({...th, rotationMin: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Rotación ideal ≥</span>
+                      <input type="number" step="0.1" value={th.rotationIdeal} onChange={e=>setTh({...th, rotationIdeal: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                  </div>
+                </ThresholdPanel>
+
+                <ThresholdPanel id="micro" title="Técnico & Micro" icon="🛠️">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
+                    {Object.entries(MARKETS).map(([key, info]) => (
+                      <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                        <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
+                        <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                      </label>
+                    ))}
+                    <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <span className="text-white/80 font-medium">Spread ≤ %</span>
+                      <input type="number" step="0.1" value={th.spreadMaxPct} onChange={e=>setTh({...th, spreadMaxPct: Number(e.target.value)})} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
+                    </label>
+                    <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
+                      <input type="checkbox" checked={th.needEMA200} onChange={e=>setTh({...th, needEMA200: e.target.checked})}/>
+                      <span>Requerir precio &gt; EMA200</span>
+                    </label>
+                  </div>
+                </ThresholdPanel>
+
+                <div className="hidden md:block text-xs text-white/60 px-1">
+                  Ajustá los tres grupos de filtros sin perder de vista la tabla ni los gráficos.
                 </div>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">{kpis.total}</div>
-                    <div className="text-xs text-white/70">tickers</div>
+              </aside>
+
+              <div className="space-y-6 mt-6 md:mt-0">
+                {/* Charts */}
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px] relative`}>
+                    <h3 className="font-semibold text-center mb-3">Distribución de SCORE</h3>
+                    <div className="h-56">
+                      {chartsAvailable ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Tooltip formatter={(v, n)=>[v, n]} />
+                            <Pie data={scoreBuckets} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
+                              {scoreBuckets.map((e, i) => (<Cell key={`c-${i}`} fill={e.color} />))}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <ChartFallback label="Distribución" />
+                      )}
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">{kpis.total}</div>
+                        <div className="text-xs text-white/70">tickers</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra los tickers activos.</div>
+                  </div>
+
+                  <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                    <h3 className="font-semibold text-center mb-3">Embudo de filtros</h3>
+                    <div className="h-56">
+                      {chartsAvailable ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <SankeyComp data={sankeyData} nodePadding={24} nodeWidth={12} linkCurvature={0.5} margin={{ left: 10, right: 10, top: 10, bottom: 10 }} />
+                        </ResponsiveContainer>
+                      ) : (
+                        <ChartFallback label="Embudo" />
+                      )}
+                    </div>
+                    <div className="mt-2 text-xs text-white/70 text-center">Flujo: Universe → PrecioOK → EMAOK → RVOL≥2 → SCORE≥70.</div>
+                  </div>
+
+                  <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+                    <h3 className="font-semibold text-center mb-3">Perfil del ticker (Radar)</h3>
+                    <div className="h-56">
+                      {chartsAvailable ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <RadarChart data={radarData} outerRadius={80}>
+                            <PolarGrid />
+                            <PolarAngleAxis dataKey="k" tick={{ fill: "#e2e8f0", fontSize: 11 }} />
+                            <PolarRadiusAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
+                            <Radar dataKey="v" stroke="#38bdf8" fill="#38bdf8" fillOpacity={0.3} />
+                            <Tooltip formatter={(v, n)=>[fmt(v,0), n]} />
+                          </RadarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <ChartFallback label="Radar" />
+                      )}
+                    </div>
+                    <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para seleccionarlo.</div>
                   </div>
                 </div>
-                <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra los tickers activos.</div>
-              </div>
 
-              {/* Sankey */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
-                <h3 className="font-semibold text-center mb-3">Embudo de filtros</h3>
-                <div className="h-56">
-                  {chartsAvailable ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <SankeyComp data={sankeyData} nodePadding={24} nodeWidth={12} linkCurvature={0.5} margin={{ left: 10, right: 10, top: 10, bottom: 10 }} />
-                    </ResponsiveContainer>
-                  ) : (
-                    <ChartFallback label="Embudo" />
-                  )}
-                </div>
-                <div className="mt-2 text-xs text-white/70 text-center">Flujo: Universe → PrecioOK → EMAOK → RVOL≥2 → SCORE≥70.</div>
-              </div>
-
-              {/* Radar */}
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
-                <h3 className="font-semibold text-center mb-3">Perfil del ticker (Radar)</h3>
-                <div className="h-56">
-                  {chartsAvailable ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <RadarChart data={radarData} outerRadius={80}>
-                        <PolarGrid />
-                        <PolarAngleAxis dataKey="k" tick={{ fill: "#e2e8f0", fontSize: 11 }} />
-                        <PolarRadiusAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
-                        <Radar dataKey="v" stroke="#38bdf8" fill="#38bdf8" fillOpacity={0.3} />
-                        <Tooltip formatter={(v, n)=>[fmt(v,0), n]} />
-                      </RadarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <ChartFallback label="Radar" />
-                  )}
-                </div>
-                <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para seleccionarlo.</div>
-              </div>
-            </div>
-
-            {/* Scanner automático */}
-            <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl`}>
-              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
-                <div>
-                  <h3 className="font-semibold">Tickers activos (auto)</h3>
-                  <div className="text-xs text-white/60 mt-0.5">Universo predefinido filtrado en tiempo real según todos los criterios activos.</div>
-                </div>
-                <div className="flex flex-col gap-2 items-end sm:flex-row sm:items-center sm:gap-3">
-                  <div className="text-xs text-white/60">Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : "—"}{scannerLoading ? " · escaneando" : ""}</div>
-                  <div className="flex gap-2">
-                    <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading}>Escanear ahora</button>
-                    <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length}>Cargar en tabla</button>
+                {/* Scanner automático */}
+                <div className={`rounded-2xl ${COLORS.glass} shadow-2xl relative`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
+                    <div>
+                      <h3 className="font-semibold">Tickers activos (auto)</h3>
+                      <div className="text-xs text-white/60 mt-0.5">Universo predefinido filtrado en tiempo real según todos los criterios activos.</div>
+                    </div>
+                    <div className="flex flex-col gap-2 items-end sm:flex-row sm:items-center sm:gap-3">
+                      <div className="text-xs text-white/60 flex items-center gap-2">
+                        {scannerLoading ? <Spinner size={14} /> : null}
+                        <span>Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : "—"}{scannerLoading ? " · escaneando" : ""}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2" onClick={triggerScan} disabled={scannerLoading}>
+                          {scannerLoading ? <Spinner size={14} /> : null}
+                          <span>Escanear ahora</span>
+                        </button>
+                        <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length}>
+                          <span>Cargar en tabla</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                  <div className="p-4 space-y-4">
+                    {scannerError ? <div className="text-xs text-rose-300">Error: {scannerError}</div> : null}
+                    {scannerLoading && !scannerMatches.length ? <div className="text-sm text-white/70 flex items-center gap-2"><Spinner size={16} />Buscando coincidencias...</div> : null}
+                    {!scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
+                    {scannerMatches.length ? (
+                      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {scannerMatches.map(({ data, computed }) => (
+                          <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="text-lg font-semibold text-white">{data.ticker}</div>
+                                <div className="text-[11px] text-white/60">{MARKETS[data.market]?.label || data.market}</div>
+                              </div>
+                              <div className="text-right text-[11px] text-white/60">{MARKETS[data.market]?.currency || ""}</div>
+                            </div>
+                                <div className="flex items-center gap-2">
+                              <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
+                              <div className="flex-1"><ScoreBar value={computed.score || 0} /></div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-xs text-white/70">
+                              <div>
+                                <div className="text-white/80 font-medium">Close</div>
+                                <div className="tabular-nums">{safeNumber(data.close)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">%día</div>
+                                <div className="tabular-nums">{safePct(computed.chgPct)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">ATR%</div>
+                                <div className="tabular-nums">{safePct(computed.atrPct)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">RVOL</div>
+                                <div className="tabular-nums">{safeNumber(computed.rvol)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">Rotación</div>
+                                <div className="tabular-nums">{safeNumber(computed.rotation)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">Float (M)</div>
+                                <div className="tabular-nums">{safeNumber(data.floatM)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">Short%</div>
+                                <div className="tabular-nums">{safePct(data.shortPct)}</div>
+                              </div>
+                              <div>
+                                <div className="text-white/80 font-medium">Liquidez (M)</div>
+                                <div className="tabular-nums">{safeNumber(data.liqM, 1)} {MARKETS[data.market]?.currency || ""}</div>
+                              </div>
+                            </div>
+                                <div className="flex flex-wrap gap-1">
+                              <Badge ok={computed.flags.priceOK} label="Precio" />
+                              <Badge ok={computed.flags.emaOK} label={">EMA"} />
+                              <Badge ok={computed.flags.rvol2} label={"RVOL≥2"} />
+                              <Badge ok={computed.flags.rvol5} label={"RVOL≥5"} />
+                              <Badge ok={computed.flags.chgOK} label={"%día"} />
+                              <Badge ok={computed.flags.atrOK} label={"ATR"} />
+                              <Badge ok={computed.flags.float50} label={"Float<50"} />
+                              <Badge ok={computed.flags.float10} label={"Float<10"} />
+                              <Badge ok={computed.flags.rot1} label="Rot≥1x" />
+                              <Badge ok={computed.flags.rot3} label="Rot≥3x" />
+                              <Badge ok={computed.flags.shortOK} label="Short%" />
+                              <Badge ok={computed.flags.spreadOK} label={"Spread"} />
+                              <Badge ok={computed.flags.liqOK} label={`Liq ${MARKETS[data.market]?.currency || ""}`} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {scannerLoading ? (
+                    <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center text-sm text-white/80 gap-2 pointer-events-none">
+                      <Spinner size={20} />
+                      <span>Escaneando universo...</span>
+                    </div>
+                  ) : null}
                 </div>
-              </div>
-              <div className="p-4 space-y-4">
-                {scannerError ? <div className="text-xs text-rose-300">Error: {scannerError}</div> : null}
-                {scannerLoading && !scannerMatches.length ? <div className="text-sm text-white/70">Buscando coincidencias...</div> : null}
-                {!scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
-                {scannerMatches.length ? (
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {scannerMatches.map(({ data, computed }) => (
-                      <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="text-lg font-semibold text-white">{data.ticker}</div>
-                            <div className="text-[11px] text-white/60">{MARKETS[data.market]?.label || data.market}</div>
-                          </div>
-                          <div className="text-right text-[11px] text-white/60">{MARKETS[data.market]?.currency || ""}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
-                          <div className="flex-1"><ScoreBar value={computed.score || 0} /></div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-xs text-white/70">
-                          <div>
-                            <div className="text-white/80 font-medium">Close</div>
-                            <div className="tabular-nums">{safeNumber(data.close)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">%día</div>
-                            <div className="tabular-nums">{safePct(computed.chgPct)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">ATR%</div>
-                            <div className="tabular-nums">{safePct(computed.atrPct)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">RVOL</div>
-                            <div className="tabular-nums">{safeNumber(computed.rvol)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">Rotación</div>
-                            <div className="tabular-nums">{safeNumber(computed.rotation)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">Float (M)</div>
-                            <div className="tabular-nums">{safeNumber(data.floatM)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">Short%</div>
-                            <div className="tabular-nums">{safePct(data.shortPct)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/80 font-medium">Liquidez (M)</div>
-                            <div className="tabular-nums">{safeNumber(data.liqM, 1)} {MARKETS[data.market]?.currency || ""}</div>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge ok={computed.flags.priceOK} label="Precio" />
-                          <Badge ok={computed.flags.emaOK} label=">EMA" />
-                          <Badge ok={computed.flags.rvol2} label="RVOL≥2" />
-                          <Badge ok={computed.flags.rvol5} label="RVOL≥5" />
-                          <Badge ok={computed.flags.chgOK} label="%día" />
-                          <Badge ok={computed.flags.atrOK} label="ATR" />
-                          <Badge ok={computed.flags.float50} label="Float<50" />
-                          <Badge ok={computed.flags.float10} label="Float<10" />
-                          <Badge ok={computed.flags.rot1} label="Rot≥1x" />
-                          <Badge ok={computed.flags.rot3} label="Rot≥3x" />
-                          <Badge ok={computed.flags.shortOK} label="Short%" />
-                          <Badge ok={computed.flags.spreadOK} label="Spread" />
-                          <Badge ok={computed.flags.liqOK} label={`Liq ${MARKETS[data.market]?.currency || ""}`} />
+
+                {/* Tabla */}
+                <div className={`rounded-2xl ${COLORS.glass} shadow-2xl overflow-hidden relative`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
+                    <div>
+                      <h3 className="font-semibold">Tickers</h3>
+                      <div className="text-xs text-white/60 mt-0.5 flex items-center gap-2">
+                        {loadingQuotes ? <Spinner size={14} /> : null}
+                        <span>Última actualización: {lastUpdatedLabel}{loadingQuotes ? " · actualizando" : ""}</span>
+                      </div>
+                      {fetchError ? <div className="text-xs text-rose-300 mt-1">Error: {fetchError}</div> : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={addRow}>+ Agregar fila</button>
+                      <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={clearRows}>Limpiar</button>
+                      <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition flex items-center gap-2" onClick={refreshQuotes}>
+                        {loadingQuotes ? <Spinner size={14} /> : null}
+                        <span>{loadingQuotes ? "Actualizando..." : "Actualizar ahora"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-3 border-b border-white/10 bg-white/5 space-y-3">
+                    <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+                      <div className="flex-1 min-w-[220px]">
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 ring-1 ring-white/10">
+                          <svg viewBox="0 0 24 24" className="w-4 h-4 text-white/60" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="7" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                          </svg>
+                          <input type="search" value={tableSearch} onChange={e=>setTableSearch(e.target.value)} placeholder="Buscar ticker..." className="bg-transparent focus:outline-none text-sm text-white flex-1" />
                         </div>
                       </div>
-                    ))}
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-white/70">
+                        <label className="flex items-center gap-2">
+                          <span className="uppercase tracking-wide text-white/60">Mercado</span>
+                          <select value={tableMarketFilter} onChange={e=>setTableMarketFilter(e.target.value)} className="bg-white/10 text-white rounded px-2 py-1 border border-white/20">
+                            <option value="ALL" className="bg-slate-900">Todos</option>
+                            {Object.entries(MARKETS).map(([key, info]) => (
+                              <option key={key} value={key} className="bg-slate-900">{info.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <span className="uppercase tracking-wide text-white/60">SCORE ≥</span>
+                          <input type="range" min="0" max="100" step="5" value={tableScoreMin} onChange={e=>setTableScoreMin(Number(e.target.value))} className="w-32 accent-emerald-400" />
+                          <span className="font-semibold text-white">{tableScoreMin}</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={tableOnlyQualified} onChange={e=>setTableOnlyQualified(e.target.checked)} />
+                          <span>Solo checklist completo</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-white/70">
+                      <label className="flex items-center gap-2">
+                        <span className="uppercase tracking-wide text-white/60">Ordenar por</span>
+                        <select value={tableSortKey} onChange={e=>setTableSortKey(e.target.value)} className="bg-white/10 text-white rounded px-2 py-1 border border-white/20">
+                          <option value="score" className="bg-slate-900">SCORE</option>
+                          <option value="ticker" className="bg-slate-900">Ticker</option>
+                          <option value="market" className="bg-slate-900">Mercado</option>
+                          <option value="price" className="bg-slate-900">Precio</option>
+                          <option value="change" className="bg-slate-900">%día</option>
+                          <option value="rvol" className="bg-slate-900">RVOL</option>
+                          <option value="float" className="bg-slate-900">Float</option>
+                          <option value="rotation" className="bg-slate-900">Rotación</option>
+                          <option value="liq" className="bg-slate-900">Liquidez</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <span className="uppercase tracking-wide text-white/60">Dirección</span>
+                        <select value={tableSortDir} onChange={e=>setTableSortDir(e.target.value)} className="bg-white/10 text-white rounded px-2 py-1 border border-white/20">
+                          <option value="desc" className="bg-slate-900">Desc</option>
+                          <option value="asc" className="bg-slate-900">Asc</option>
+                        </select>
+                      </label>
+                      <button onClick={resetTableFilters} className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition text-xs">Reiniciar filtros</button>
+                    </div>
                   </div>
-                ) : null}
-              </div>
-            </div>
 
-            {/* Tabla */}
-            <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
-              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
-                <div>
-                  <h3 className="font-semibold">Tickers</h3>
-                  <div className="text-xs text-white/60 mt-0.5">Última actualización: {lastUpdatedLabel}{loadingQuotes ? " · actualizando" : ""}</div>
-                  {fetchError ? <div className="text-xs text-rose-300 mt-1">Error: {fetchError}</div> : null}
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={addRow}>+ Agregar fila</button>
-                  <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={clearRows}>Limpiar</button>
-                  <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={refreshQuotes}>{loadingQuotes ? "Actualizando..." : "Actualizar ahora"}</button>
-                </div>
-              </div>
-              <div className="overflow-auto max-h-[60vh]">
-                <table className="min-w-full text-xs table-fixed">
-                  <thead>
-                    <tr className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur">
-                      {[
-                        "Ticker/Mercado","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC (TTS)","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"
-                      ].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => {
-                      const market = r.market || "US";
-                      const info = MARKETS[market] || MARKETS.US;
-                      const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
-                      const selected = (r.id === selectedId) || (!selectedId && rows.length > 0 && r.id === rows[0].id);
-                      return (
-                        <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-col gap-1">
-                              <input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/>
-                              <select value={market} onChange={e=>update(r.id, "market", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs">
+                  <div className="relative">
+                    <div className="overflow-auto max-h-[60vh]">
+                      <table className="min-w-full text-xs table-fixed">
+                        <thead>
+                          <tr className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur">
+                            {["Ticker/Mercado","Open","Close","Bid","Ask","Promedio","VolHoy","VolProm20","RVOL","Float(M)","Rotación","Short%","DTC (TTS)","ATR14","ATR%","EMA9","EMA200","%día","Catal","IntradíaOK","Spread%","Liquidez(M)","Flags","SCORE","Notas"].map((h,i)=> (<th key={i} className="px-3 py-2 font-semibold text-left whitespace-nowrap text-white/90">{h}</th>))}
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {loadingQuotes && !filteredComputed.length ? (
+                            Array.from({ length: Math.max(3, Math.min(rows.length || 0, 6)) }).map((_, idx) => (
+                              <tr key={`skeleton-${idx}`} className="border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03]">
+                                <td className="px-3 py-3"><SkeletonBlock className="h-6 w-20" /></td>
+                                <td colSpan={23} className="px-3 py-3">
+                                  <div className="grid grid-cols-6 gap-2">
+                                    {Array.from({ length: 6 }).map((__, i) => (
+                                      <SkeletonBlock key={i} className="h-4" />
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          ) : null}
+                          {!loadingQuotes && !filteredComputed.length ? (
+                            <tr>
+                              <td colSpan={24} className="px-4 py-6 text-center text-sm text-white/60">
+                                Sin resultados con los filtros actuales.
+                              </td>
+                            </tr>
+                          ) : null}
+                          {filteredComputed.map((item) => {
+                            const { r, rvol, atrPct, chgPct, rotation, score, flags } = item;
+                            const marketKey = r.market || item.market || "US";
+                            const info = MARKETS[marketKey] || MARKETS.US;
+                            const selected = r.id === fallbackSelectedId;
+                            return (
+                            <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
+                                <td className="px-3 py-2">
+                                <div className="flex flex-col gap-1">
+                                <input value={r.ticker} onChange={e=>update(r.id, "ticker", (e.target.value || "").toUpperCase())} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1" placeholder="TICK"/>
+                                <select value={marketKey} onChange={e=>update(r.id, "market", e.target.value)} className="w-24 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs">
                                 {Object.entries(MARKETS).map(([key, m]) => (
                                   <option key={key} value={key} className="bg-slate-900">{m.label}</option>
                                 ))}
                               </select>
                             </div>
                           </td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.close)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.bid)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.ask)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.avgPrice)}</td>
-                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volToday)}</td>
-                          <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volAvg20)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rvol)}</td>
-                          <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.floatM)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rotation)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.shortPct)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.dtc)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.atr14)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(atrPct)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema9)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema200)}</td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(chgPct)}</td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
-                          <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.spreadPct)}</td>
-                          <td className="px-3 py-2 w-24">
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.close)}</td>
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.bid)}</td>
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.ask)}</td>
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.avgPrice)}</td>
+                                <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volToday)}</td>
+                                <td className="px-3 py-2 w-28 text-right tabular-nums">{safeInteger(r.volAvg20)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rvol)}</td>
+                                <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.floatM)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(rotation)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.shortPct)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.dtc)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.atr14)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(atrPct)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema9)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(r.ema200)}</td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(chgPct)}</td>
+                                <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.catalyst} onChange={e=>update(r.id, "catalyst", e.target.checked)} /></td>
+                                <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!r.intradiaOK} onChange={e=>update(r.id, "intradiaOK", e.target.checked)} /></td>
+                                <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(r.spreadPct)}</td>
+                                <td className="px-3 py-2 w-24">
                             <div className="flex flex-col items-end gap-1">
                               <span className="tabular-nums">{safeNumber(r.liqM, 1)}</span>
                               <span className="text-[10px] text-white/60">{info.currency}</span>
                             </div>
                           </td>
-                          <td className="px-3 py-2 w-[360px]">
-                            <div className="flex flex-wrap gap-1">
+                                <td className="px-3 py-2 w-[360px]">
+                                <div className="flex flex-wrap gap-1">
                               <Badge ok={flags.priceOK} label="Precio" />
-                              <Badge ok={flags.emaOK} label={"\u003eEMA"} />
-                              <Badge ok={flags.rvol2} label="RVOL≥2" />
-                              <Badge ok={flags.rvol5} label="RVOL≥5" />
-                              <Badge ok={flags.chgOK} label="%día" />
-                              <Badge ok={flags.atrOK} label="ATR" />
-                              <Badge ok={flags.float50} label={"Float\u003c50"} />
-                              <Badge ok={flags.float10} label={"Float\u003c10"} />
+                              <Badge ok={flags.emaOK} label={">EMA"} />
+                              <Badge ok={flags.rvol2} label={"RVOL≥2"} />
+                              <Badge ok={flags.rvol5} label={"RVOL≥5"} />
+                              <Badge ok={flags.chgOK} label={"%día"} />
+                              <Badge ok={flags.atrOK} label={"ATR"} />
+                              <Badge ok={flags.float50} label={"Float<50"} />
+                              <Badge ok={flags.float10} label={"Float<10"} />
                               <Badge ok={flags.rot1} label="Rot≥1x" />
                               <Badge ok={flags.rot3} label="Rot≥3x" />
                               <Badge ok={flags.shortOK} label="Short%" />
-                              <Badge ok={flags.spreadOK} label="Spread" />
+                              <Badge ok={flags.spreadOK} label={"Spread"} />
                               <Badge ok={flags.liqOK} label={`Liq ${info.currency}`} />
                             </div>
                           </td>
-                          <td className="px-2 py-1.5 w-44">
-                            <div className="flex items-center gap-2">
+                                <td className="px-2 py-1.5 w-44">
+                                <div className="flex items-center gap-2">
                               <span className="w-12 text-right font-semibold tabular-nums">{safeNumber(score, 0)}</span>
                               <div className="flex-1"><ScoreBar value={score || 0} /></div>
                             </div>
                           </td>
-                          <td className="px-3 py-2 align-top">
-                            <textarea value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} rows={2} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs" placeholder="Notas" />
+                                <td className="px-3 py-2 align-top">
+                                <textarea value={r.comments || ""} onChange={e=>update(r.id, "comments", e.target.value)} rows={2} className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs" placeholder="Notas" />
                           </td>
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-              </div>
-            </div>
+                        </tbody>
 
-            <div className="mt-4 text-xs text-white/70 text-center">
-              <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
-            </div>
-              <div className={`rounded-2xl ${COLORS.glass} mt-6 p-6 shadow-xl`}>
-              <h3 className="text-lg font-semibold text-center">Guía rápida de métricas</h3>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-4 text-sm text-white/70">
-                <div>
-                  <h4 className="text-white font-semibold text-base mb-2">Precio &amp; Volatilidad</h4>
-                  <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">Rango de precio:</span> controla los valores mínimo y máximo aceptados para cada mercado.</li>
-                    <li><span className="text-white">%día ≥:</span> porcentaje mínimo de variación respecto de la apertura; mide aceleración intradía del precio.</li>
-                    <li><span className="text-white">ATR ≥:</span> umbral de rango verdadero promedio en moneda local para asegurar amplitud de movimiento en términos absolutos.</li>
-                    <li><span className="text-white">ATR% ≥:</span> versión relativa del ATR sobre el precio de cierre, estandariza la volatilidad para comparar tickers distintos.</li>
-                  </ul>
+                      </table>
+                    </div>
+                        {loadingQuotes ? (
+                      <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-sm text-white/80">
+                        <Spinner size={22} />
+                        <span>Actualizando cotizaciones...</span>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Float</h4>
-                  <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">RVOL ≥:</span> relación mínima entre el volumen actual y el promedio reciente; confirma que hay volumen anómalo entrando.</li>
-                    <li><span className="text-white">RVOL ideal ≥:</span> objetivo superior de participación respecto del promedio, referencia para los escenarios más fuertes.</li>
-                    <li><span className="text-white">Float &lt; (M):</span> límite máximo de acciones disponibles en millones para privilegiar floats reducidos y susceptibles de squeeze.</li>
-                    <li><span className="text-white">Pref. Float &lt; (M):</span> umbral preferido aún más exigente, típico para plays súper especulativos.</li>
-                    <li><span className="text-white">Rotación ≥:</span> rotación mínima (VolHoy / Float) que debe darse durante la sesión para validar interés genuino.</li>
-                    <li><span className="text-white">Rotación ideal ≥:</span> objetivo de rotación que marca un flujo excepcional sobre el float.</li>
-                  </ul>
+
+                <div className="text-xs text-white/70 text-center">
+                  <p>Tips: Seleccioná el mercado (EEUU/Argentina) para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
                 </div>
-                <div>
-                  <h4 className="text-white font-semibold text-base mb-2">Técnico &amp; Micro</h4>
-                  <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">Liquidez mínima (M):</span> monto mínimo negociado por mercado para asegurar ejecuciones sin slippage excesivo.</li>
-                    <li><span className="text-white">Spread ≤ %:</span> tope de diferencia bid/ask permitido para evitar spreads amplios.</li>
-                    <li><span className="text-white">Requerir precio &gt; EMA200:</span> check que fuerza a que el precio esté sobre la media de 200 días antes de aprobar.</li>
-                    <li><span className="text-white">Stickers en tabla:</span> insignias verdes/rojas que muestran de un vistazo qué filtros superó cada ticker (precio, RVOL, float, etc.).</li>
-                  </ul>
-                </div>
-                <div>
-                  <h4 className="text-white font-semibold text-base mb-2">KPIs &amp; Presets clave</h4>
-                  <ul className="space-y-1.5 list-disc list-inside">
-                    <li><span className="text-white">Auto activos:</span> cantidad de tickers que el escáner cargó automáticamente desde el universo con los filtros vigentes.</li>
-                    <li><span className="text-white">Máximo:</span> mejor SCORE registrado en la tabla; sirve como referencia del techo actual del setup.</li>
-                    <li><span className="text-white">En juego:</span> número de tickers con score intermedio que están cerca de cumplir todos los criterios.</li>
-                    <li><span className="text-white">Listas 70+:</span> tickers con SCORE ≥ 70, considerados listos para ejecutar según el checklist.</li>
-                    <li><span className="text-white">Preset Moderado:</span> configura umbrales equilibrados (RVOL≥2, %día≥10, ATR%≥3, etc.) para escenarios momentum estándar.</li>
-                    <li><span className="text-white">Preset Agresivo:</span> sube las exigencias (RVOL≥3, %día≥20, ATR%≥4, float preferido &lt;50M) apuntando a plays parabólicos de alta convicción.</li>
-                  </ul>
+                <div className={`rounded-2xl ${COLORS.glass} p-6 shadow-xl`}>
+                  <h3 className="text-lg font-semibold text-center">Guía rápida de métricas</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-4 text-sm text-white/70">
+                    <div>
+                      <h4 className="text-white font-semibold text-base mb-2">Precio &amp; Volatilidad</h4>
+                      <ul className="space-y-1.5 list-disc list-inside">
+                        <li><span className="text-white">Rango de precio:</span> controla los valores mínimo y máximo aceptados para cada mercado.</li>
+                        <li><span className="text-white">%día ≥:</span> porcentaje mínimo de variación respecto de la apertura; mide aceleración intradía del precio.</li>
+                        <li><span className="text-white">ATR ≥:</span> umbral de rango verdadero promedio en moneda local para asegurar amplitud de movimiento en términos absolutos.</li>
+                        <li><span className="text-white">ATR% ≥:</span> versión relativa del ATR sobre el precio de cierre, estandariza la volatilidad para comparar tickers distintos.</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold text-base mb-2">Volumen &amp; Float</h4>
+                      <ul className="space-y-1.5 list-disc list-inside">
+                        <li><span className="text-white">RVOL ≥:</span> relación mínima entre el volumen actual y el promedio reciente; confirma que hay volumen anómalo entrando.</li>
+                        <li><span className="text-white">RVOL ideal ≥:</span> objetivo superior de participación respecto del promedio, referencia para los escenarios más fuertes.</li>
+                        <li><span className="text-white">Float &lt; (M):</span> límite máximo de acciones disponibles en millones para privilegiar floats reducidos y susceptibles de squeeze.</li>
+                        <li><span className="text-white">Pref. Float &lt; (M):</span> umbral preferido aún más exigente, típico para plays súper especulativos.</li>
+                        <li><span className="text-white">Rotación ≥:</span> rotación mínima (VolHoy / Float) que debe darse durante la sesión para validar interés genuino.</li>
+                        <li><span className="text-white">Rotación ideal ≥:</span> objetivo de rotación que marca un flujo excepcional sobre el float.</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold text-base mb-2">Técnico &amp; Micro</h4>
+                      <ul className="space-y-1.5 list-disc list-inside">
+                        <li><span className="text-white">Liquidez mínima (M):</span> monto mínimo negociado por mercado para asegurar ejecuciones sin slippage excesivo.</li>
+                        <li><span className="text-white">Spread ≤ %:</span> tope de diferencia bid/ask permitido para evitar spreads amplios.</li>
+                        <li><span className="text-white">Requerir precio &gt; EMA200:</span> check que fuerza a que el precio esté sobre la media de 200 días antes de aprobar.</li>
+                        <li><span className="text-white">Stickers en tabla:</span> insignias verdes/rojas que muestran de un vistazo qué filtros superó cada ticker (precio, RVOL, float, etc.).</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold text-base mb-2">KPIs &amp; Presets clave</h4>
+                      <ul className="space-y-1.5 list-disc list-inside">
+                        <li><span className="text-white">Auto activos:</span> cantidad de tickers que el escáner cargó automáticamente desde el universo con los filtros vigentes.</li>
+                        <li><span className="text-white">Máximo:</span> mejor SCORE registrado en la tabla; sirve como referencia del techo actual del setup.</li>
+                        <li><span className="text-white">En juego:</span> número de tickers con score intermedio que están cerca de cumplir todos los criterios.</li>
+                        <li><span className="text-white">Listas 70+:</span> tickers con SCORE ≥ 70, considerados listos para ejecutar según el checklist.</li>
+                        <li><span className="text-white">Preset Moderado:</span> configura umbrales equilibrados (RVOL≥2, %día≥10, ATR%≥3, etc.) para escenarios momentum estándar.</li>
+                        <li><span className="text-white">Preset Agresivo:</span> sube las exigencias (RVOL≥3, %día≥20, ATR%≥4, float preferido &lt;50M) apuntando a plays parabólicos de alta convicción.</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
           </div>
       );
     }
