@@ -67,12 +67,30 @@
     };
 
     const MARKETS = {
-      US: { label: "EEUU", currency: "USD" },
-      AR: { label: "Argentina", currency: "ARS" },
-      BR: { label: "Brasil", currency: "BRL" },
-      EU: { label: "Europa", currency: "EUR" },
-      CN: { label: "China", currency: "CNY" },
+      US: { label: "EEUU", currency: "USD", currencySymbol: "US$", timezone: "America/New_York", tzShort: "ET" },
+      AR: { label: "Argentina", currency: "ARS", currencySymbol: "$", timezone: "America/Argentina/Buenos_Aires", tzShort: "ART" },
+      BR: { label: "Brasil", currency: "BRL", currencySymbol: "R$", timezone: "America/Sao_Paulo", tzShort: "BRT" },
+      EU: { label: "Europa", currency: "EUR", currencySymbol: "€", timezone: "Europe/Berlin", tzShort: "CET" },
+      CN: { label: "China", currency: "CNY", currencySymbol: "¥", timezone: "Asia/Shanghai", tzShort: "CST" },
     };
+    const CURRENCY_SYMBOLS = Object.fromEntries(Object.entries(MARKETS).map(([key, info]) => [info.currency, info.currencySymbol]));
+    const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const formatTime = (iso, { timeZone, withZoneName = false } = {}) => {
+      if (!iso) return null;
+      try {
+        const options = { hour: "2-digit", minute: "2-digit", second: "2-digit" };
+        if (withZoneName) options.timeZoneName = "short";
+        if (timeZone) options.timeZone = timeZone;
+        return new Intl.DateTimeFormat("es-AR", options).format(new Date(iso));
+      } catch (err) {
+        return new Date(iso).toLocaleTimeString();
+      }
+    };
+    const formatCurrencyTag = (code, symbol) => {
+      if (code && symbol) return `${symbol} · ${code}`;
+      return symbol || code || "—";
+    };
+    const formatTimezoneTag = (tzShort, tzName) => tzShort || tzName || "—";
 
     const UNIVERSE = {
       US: [
@@ -109,8 +127,9 @@
       </div>
     );
 
-    const extractQuoteFields = (quote) => {
+    const extractQuoteFields = (quote, marketKey) => {
       if (!quote) return {};
+      const marketInfo = MARKETS[marketKey] || MARKETS.US;
       const open = toNum(quote.regularMarketOpen);
       const close = toNum(quote.regularMarketPrice);
       const volToday = toNum(quote.regularMarketVolume);
@@ -141,6 +160,11 @@
       const dtc = (typeof sharesShort === "number" && typeof avgVolForDtc === "number" && avgVolForDtc > 0)
         ? (sharesShort / avgVolForDtc)
         : undefined;
+      const currencyCode = quote.currency || quote.financialCurrency || marketInfo.currency;
+      const currencySymbol = CURRENCY_SYMBOLS[currencyCode] || marketInfo.currencySymbol || currencyCode;
+      const timezoneName = quote.exchangeTimezoneName || marketInfo.timezone;
+      const timezoneShort = quote.exchangeTimezoneShortName || marketInfo.tzShort;
+      const lastTradeTime = quote.regularMarketTime ? new Date(quote.regularMarketTime * 1000).toISOString() : null;
       return {
         open,
         close,
@@ -157,6 +181,11 @@
         ema200: toNum(quote.twoHundredDayAverage),
         spreadPct,
         liqM: usdLiquidityM,
+        currency: currencyCode,
+        currencySymbol,
+        timezone: timezoneShort,
+        timezoneName,
+        lastTradeTime,
       };
     };
 
@@ -186,6 +215,7 @@
       const [refreshToken, setRefreshToken] = useState(0);
       const [loadingQuotes, setLoadingQuotes] = useState(false);
       const [fetchError, setFetchError] = useState(null);
+      const [lastQuoteSuccess, setLastQuoteSuccess] = useState(null);
       const [scannerState, setScannerState] = useState({ matches: [], loading: false, error: null, lastUpdated: null });
       const [scanToken, setScanToken] = useState(0);
 
@@ -256,38 +286,65 @@
       }), [th]);
 
       // ---------- Filas ----------
-      const createRow = (overrides = {}) => ({
-        id: uid(),
-        ticker: "",
-        market: "US",
-        open: undefined,
-        close: undefined,
-        bid: undefined,
-        ask: undefined,
-        avgPrice: undefined,
-        volToday: undefined,
-        volAvg20: undefined,
-        floatM: undefined,
-        shortPct: undefined,
-        dtc: undefined,
-        atr14: undefined,
-        ema9: undefined,
-        ema200: undefined,
-        spreadPct: undefined,
-        liqM: undefined,
-        catalyst: false,
-        intradiaOK: false,
-        comments: "",
-        lastUpdate: null,
-        ...overrides,
-      });
+      const createRow = (overrides = {}) => {
+        const marketKey = overrides.market || "US";
+        const marketInfo = MARKETS[marketKey] || MARKETS.US;
+        return {
+          id: uid(),
+          ticker: "",
+          market: marketKey,
+          open: undefined,
+          close: undefined,
+          bid: undefined,
+          ask: undefined,
+          avgPrice: undefined,
+          volToday: undefined,
+          volAvg20: undefined,
+          floatM: undefined,
+          shortPct: undefined,
+          dtc: undefined,
+          atr14: undefined,
+          ema9: undefined,
+          ema200: undefined,
+          spreadPct: undefined,
+          liqM: undefined,
+          catalyst: false,
+          intradiaOK: false,
+          comments: "",
+          lastUpdate: null,
+          currency: marketInfo.currency,
+          currencySymbol: marketInfo.currencySymbol,
+          timezone: marketInfo.tzShort,
+          timezoneName: marketInfo.timezone,
+          lastTradeTime: null,
+          ...overrides,
+        };
+      };
       const [rows, setRows] = useState([createRow()]);
       const addRow = () => setRows(r => ([...r, createRow()]));
       const clearRows = () => {
         setRows([createRow()]);
         setSelectedId(null);
+        setFetchError(null);
+        setLastQuoteSuccess(null);
       };
-      const update = (id, key, value) => setRows(prev => prev.map(r => r.id === id ? { ...r, [key]: value } : r));
+      const update = (id, key, value) => setRows(prev => prev.map(r => {
+        if (r.id !== id) return r;
+        if (key === "market") {
+          const marketInfo = MARKETS[value] || MARKETS.US;
+          return {
+            ...r,
+            market: value,
+            currency: marketInfo.currency,
+            currencySymbol: marketInfo.currencySymbol,
+            timezone: marketInfo.tzShort,
+            timezoneName: marketInfo.timezone,
+            lastUpdate: null,
+            lastTradeTime: null,
+          };
+        }
+        return { ...r, [key]: value };
+      }));
 
       const [selectedId, setSelectedId] = useState(null);
       const tickers = useMemo(() => rows.map(r => r.ticker).filter(Boolean), [rows]);
@@ -301,36 +358,51 @@
         }
         let active = true;
         const fetchQuotes = async () => {
-          try {
-            if (!active) return;
-            setLoadingQuotes(true);
-            setFetchError(null);
-            const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickersKey)}`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const json = await response.json();
-            const result = (json?.quoteResponse?.result || []).reduce((acc, quote) => {
-              if (quote?.symbol) acc[quote.symbol.toUpperCase()] = quote;
-              return acc;
-            }, {});
-            if (!active) return;
-            setRows(prev => prev.map(row => {
-              const quote = result[row.ticker];
-              if (!quote) return row;
-              const fields = extractQuoteFields(quote);
-              return {
-                ...row,
-                ...fields,
-                lastUpdate: new Date().toISOString(),
-              };
-            }));
-          } catch (err) {
-            console.error(err);
-            if (!active) return;
-            setFetchError(err?.message || "Error al actualizar datos");
-          } finally {
-            if (!active) return;
-            setLoadingQuotes(false);
+          if (!active) return;
+          setLoadingQuotes(true);
+          setFetchError(null);
+          const maxAttempts = 3;
+          let attempt = 0;
+          let lastError = null;
+          const requestUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickersKey)}`;
+          while (attempt < maxAttempts && active) {
+            try {
+              attempt += 1;
+              const response = await fetch(requestUrl);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const json = await response.json();
+              const result = (json?.quoteResponse?.result || []).reduce((acc, quote) => {
+                if (quote?.symbol) acc[quote.symbol.toUpperCase()] = quote;
+                return acc;
+              }, {});
+              if (!active) return;
+              const nowIso = new Date().toISOString();
+              setRows(prev => prev.map(row => {
+                const quote = result[row.ticker];
+                if (!quote) return row;
+                const fields = extractQuoteFields(quote, row.market);
+                return {
+                  ...row,
+                  ...fields,
+                  lastUpdate: nowIso,
+                };
+              }));
+              setLastQuoteSuccess(nowIso);
+              lastError = null;
+              break;
+            } catch (err) {
+              lastError = err;
+              console.error(err);
+              if (attempt < maxAttempts) {
+                await wait(500 * Math.pow(2, attempt - 1));
+              }
+            }
           }
+          if (!active) return;
+          if (lastError) {
+            setFetchError(`No se pudieron actualizar precios desde Yahoo Finance tras ${maxAttempts} intentos. Revisá tu conexión o esperá unos minutos antes de reintentar. Detalle técnico: ${lastError?.message || lastError}`);
+          }
+          setLoadingQuotes(false);
         };
         fetchQuotes();
         const interval = setInterval(fetchQuotes, 30000);
@@ -357,14 +429,37 @@
             const symbols = entries.map(([symbol]) => symbol);
             const quotes = {};
             const chunkSize = 25;
+            const maxAttempts = 3;
             for (let i = 0; i < symbols.length; i += chunkSize) {
               if (!active) return;
               const chunk = symbols.slice(i, i + chunkSize);
               if (!chunk.length) continue;
-              const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(chunk.join(","))}`);
-              if (!response.ok) throw new Error(`HTTP ${response.status}`);
-              const json = await response.json();
-              const result = json?.quoteResponse?.result || [];
+              const requestUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(chunk.join(","))}`;
+              let attempt = 0;
+              let chunkError = null;
+              let result = [];
+              while (attempt < maxAttempts && active) {
+                try {
+                  attempt += 1;
+                  const response = await fetch(requestUrl);
+                  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  const json = await response.json();
+                  result = json?.quoteResponse?.result || [];
+                  chunkError = null;
+                  break;
+                } catch (err) {
+                  chunkError = err;
+                  console.error(err);
+                  if (attempt < maxAttempts) {
+                    await wait(500 * Math.pow(2, attempt - 1));
+                  }
+                }
+              }
+              if (!active) return;
+              if (chunkError) {
+                const sample = chunk.slice(0, 3).join(", ");
+                throw new Error(`Yahoo Finance no respondió para ${sample} tras ${maxAttempts} intentos (${chunkError?.message || chunkError})`);
+              }
               result.forEach((quote) => {
                 if (quote?.symbol) {
                   quotes[quote.symbol.toUpperCase()] = quote;
@@ -377,7 +472,7 @@
               const quote = quotes[key];
               if (!quote) return null;
               const market = symbolToMarket[key] || "US";
-              const fields = extractQuoteFields(quote);
+              const fields = extractQuoteFields(quote, market);
               const data = { ticker: key, market, ...fields };
               const computed = calc(data, market);
               const flags = computed?.flags || {};
@@ -399,7 +494,7 @@
             setScannerState((prev) => ({
               ...prev,
               loading: false,
-              error: err?.message || "Error al escanear universo",
+              error: `No se pudo completar el escaneo con Yahoo Finance. Revisá la conexión o intentá nuevamente en breve. Detalle técnico: ${err?.message || err}`,
             }));
           }
         };
@@ -431,20 +526,21 @@
         }
         return "—";
       };
-      const lastUpdated = useMemo(() => {
+      const lastUpdatedFromRows = useMemo(() => {
         const stamps = rows.map(r => r.lastUpdate).filter(Boolean);
         if (!stamps.length) return null;
         return stamps.reduce((max, cur) => (cur > max ? cur : max), stamps[0]);
       }, [rows]);
-      const lastUpdatedLabel = useMemo(() => {
-        if (!lastUpdated) return "Sin datos";
-        const d = new Date(lastUpdated);
-        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      }, [lastUpdated]);
+      const lastQuoteSuccessLabel = useMemo(() => {
+        const target = lastQuoteSuccess || lastUpdatedFromRows;
+        if (!target) return "Sin datos";
+        const formatted = formatTime(target, { withZoneName: true });
+        return formatted || "Sin datos";
+      }, [lastQuoteSuccess, lastUpdatedFromRows]);
       const scannerUpdatedLabel = useMemo(() => {
         if (!scannerState.lastUpdated) return "Sin datos";
-        const d = new Date(scannerState.lastUpdated);
-        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const formatted = formatTime(scannerState.lastUpdated, { withZoneName: true });
+        return formatted || "Sin datos";
       }, [scannerState.lastUpdated]);
       const scannerMatches = scannerState.matches || [];
       const scannerLoading = !!scannerState.loading;
@@ -533,7 +629,7 @@
           const info = MARKETS[market] || MARKETS.US;
           const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
           lines.push([
-            r.ticker, info.label, info.currency, r.open, r.close, r.bid, r.ask, r.avgPrice, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
+            r.ticker, info.label, r.currency || info.currency, r.open, r.close, r.bid, r.ask, r.avgPrice, r.volToday, r.volAvg20, fmt(rvol), r.floatM, fmt(rotation,2), r.shortPct, r.dtc, r.atr14, fmt(atrPct), r.ema9, r.ema200, fmt(chgPct), r.catalyst, r.intradiaOK, r.spreadPct, r.liqM, Math.round(score||0),
             flags.priceOK, flags.emaOK, flags.rvol2, flags.rvol5, flags.chgOK, flags.atrOK, flags.float50, flags.float10, flags.rot1, flags.rot3, flags.shortOK, flags.spreadOK, flags.liqOK
           ].join(","));
         });
@@ -570,6 +666,7 @@
             intradiaOK: true,
             comments: "Gap + volumen explosivo",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
           createRow({
             ticker: "PLTR",
@@ -593,6 +690,7 @@
             intradiaOK: true,
             comments: "Rompió consolidación diaria",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
           createRow({
             ticker: "GGAL.BA",
@@ -616,6 +714,7 @@
             intradiaOK: false,
             comments: "Impulso tras resultados trimestrales",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
           createRow({
             ticker: "PETR4.SA",
@@ -639,6 +738,7 @@
             intradiaOK: true,
             comments: "Reacción a datos de producción",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
           createRow({
             ticker: "AIR.PA",
@@ -662,6 +762,7 @@
             intradiaOK: true,
             comments: "Pedidos récord en cartera",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
           createRow({
             ticker: "TSLA",
@@ -685,11 +786,13 @@
             intradiaOK: false,
             comments: "Rumores de nuevo modelo",
             lastUpdate: now,
+            lastTradeTime: now,
           }),
         ];
         setRows(demoRows);
         setSelectedId(demoRows[0]?.id || null);
         setFetchError(null);
+        setLastQuoteSuccess(now);
         setRefreshToken(Date.now());
       };
 
@@ -798,7 +901,7 @@
                     <label key={key} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15 text-sm">
                       <input type="checkbox" className="accent-emerald-400" checked={!!th.marketsEnabled?.[key]} onChange={e=>toggleMarket(key, e.target.checked)} />
                       <span>{info.label}</span>
-                      <span className="text-xs text-white/60">({info.currency})</span>
+                      <span className="text-xs text-white/60">({info.currencySymbol} · {info.currency})</span>
                     </label>
                   ))}
                 </div>
@@ -818,7 +921,7 @@
                     const cfg = th.priceRange?.[key] || {};
                     return (
                       <div key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-3">
-                        <span className="text-white/80 font-medium">{info.label} ({info.currency})</span>
+                        <span className="text-white/80 font-medium">{info.label} ({info.currencySymbol} · {info.currency})</span>
                         <div className="grid grid-cols-2 gap-3 w-full">
                           <label className="flex flex-col items-center gap-1">
                             <span className="text-[11px] uppercase tracking-wide text-white/60">Mínimo</span>
@@ -888,7 +991,7 @@
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
+                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currencySymbol} · {info.currency})</span>
                       <input type="number" step="0.5" value={th.liquidityMin?.[key] ?? ""} onChange={e=>updateLiquidityMin(key, Number(e.target.value))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"/>
                     </label>
                   ))}
@@ -990,14 +1093,23 @@
                 {!scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
                 {scannerMatches.length ? (
                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {scannerMatches.map(({ data, computed }) => (
-                      <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
+                    {scannerMatches.map(({ data, computed }) => {
+                      const marketInfo = MARKETS[data.market] || MARKETS.US;
+                      const cardCurrency = formatCurrencyTag(data.currency || marketInfo.currency, data.currencySymbol || marketInfo.currencySymbol);
+                      const cardTimezone = formatTimezoneTag(data.timezone, data.timezoneName || marketInfo.timezone);
+                      const cardMarketTime = formatTime(data.lastTradeTime, { timeZone: data.timezoneName || marketInfo.timezone, withZoneName: true });
+                      return (
+                        <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
                         <div className="flex items-start justify-between">
                           <div>
                             <div className="text-lg font-semibold text-white">{data.ticker}</div>
                             <div className="text-[11px] text-white/60">{MARKETS[data.market]?.label || data.market}</div>
                           </div>
-                          <div className="text-right text-[11px] text-white/60">{MARKETS[data.market]?.currency || ""}</div>
+                          <div className="flex flex-col items-end gap-0.5 text-right text-[10px] text-white/60">
+                            <span>{cardCurrency}</span>
+                            <span>Zona: {cardTimezone}</span>
+                            {cardMarketTime ? <span>Último trade: {cardMarketTime}</span> : null}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
@@ -1034,7 +1146,7 @@
                           </div>
                           <div>
                             <div className="text-white/80 font-medium">Liquidez (M)</div>
-                            <div className="tabular-nums">{safeNumber(data.liqM, 1)} {MARKETS[data.market]?.currency || ""}</div>
+                            <div className="tabular-nums">{safeNumber(data.liqM, 1)} {cardCurrency}</div>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-1">
@@ -1050,10 +1162,11 @@
                           <Badge ok={computed.flags.rot3} label="Rot≥3x" />
                           <Badge ok={computed.flags.shortOK} label="Short%" />
                           <Badge ok={computed.flags.spreadOK} label="Spread" />
-                          <Badge ok={computed.flags.liqOK} label={`Liq ${MARKETS[data.market]?.currency || ""}`} />
+                          <Badge ok={computed.flags.liqOK} label={`Liq ${data.currency || marketInfo.currency}`} />
                         </div>
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -1064,7 +1177,7 @@
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
                 <div>
                   <h3 className="font-semibold">Tickers</h3>
-                  <div className="text-xs text-white/60 mt-0.5">Última actualización: {lastUpdatedLabel}{loadingQuotes ? " · actualizando" : ""}</div>
+                  <div className="text-xs text-white/60 mt-0.5">Última actualización exitosa: {lastQuoteSuccessLabel}{loadingQuotes ? " · actualizando" : ""}</div>
                   {fetchError ? <div className="text-xs text-rose-300 mt-1">Error: {fetchError}</div> : null}
                 </div>
                 <div className="flex gap-2">
@@ -1088,6 +1201,9 @@
                       const info = MARKETS[market] || MARKETS.US;
                       const { rvol, atrPct, chgPct, rotation, score, flags } = calc(r, market);
                       const selected = (r.id === selectedId) || (!selectedId && rows.length > 0 && r.id === rows[0].id);
+                      const currencyTag = formatCurrencyTag(r.currency || info.currency, r.currencySymbol || info.currencySymbol);
+                      const timezoneTag = formatTimezoneTag(r.timezone, r.timezoneName || info.timezone);
+                      const marketTimeLabel = formatTime(r.lastTradeTime, { timeZone: r.timezoneName || info.timezone, withZoneName: true });
                       return (
                         <tr key={r.id} onClick={()=>setSelectedId(r.id)} className={`border-b border-white/10 odd:bg-white/0 even:bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer ${selected ? "ring-1 ring-emerald-400/40" : ""}`}>
                           <td className="px-3 py-2">
@@ -1098,6 +1214,13 @@
                                   <option key={key} value={key} className="bg-slate-900">{m.label}</option>
                                 ))}
                               </select>
+                              <div className="flex flex-wrap gap-1 text-[10px] text-white/70">
+                                <span className="px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15">{currencyTag}</span>
+                                <span className="px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15">Zona horaria: {timezoneTag}</span>
+                                {marketTimeLabel ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15">Último trade: {marketTimeLabel}</span>
+                                ) : null}
+                              </div>
                             </div>
                           </td>
                           <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(r.open)}</td>
@@ -1123,7 +1246,7 @@
                           <td className="px-3 py-2 w-24">
                             <div className="flex flex-col items-end gap-1">
                               <span className="tabular-nums">{safeNumber(r.liqM, 1)}</span>
-                              <span className="text-[10px] text-white/60">{info.currency}</span>
+                              <span className="text-[10px] text-white/60">{currencyTag}</span>
                             </div>
                           </td>
                           <td className="px-3 py-2 w-[360px]">
@@ -1140,7 +1263,7 @@
                               <Badge ok={flags.rot3} label="Rot≥3x" />
                               <Badge ok={flags.shortOK} label="Short%" />
                               <Badge ok={flags.spreadOK} label="Spread" />
-                              <Badge ok={flags.liqOK} label={`Liq ${info.currency}`} />
+                              <Badge ok={flags.liqOK} label={`Liq ${r.currency || info.currency}`} />
                             </div>
                           </td>
                           <td className="px-2 py-1.5 w-44">
