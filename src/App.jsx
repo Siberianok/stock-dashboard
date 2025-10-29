@@ -45,6 +45,12 @@ const Stat = ({ label, value, sub, icon }) => (
   </div>
 );
 
+const parseNumberInput = (value) => {
+  if (value === '' || value === null || value === undefined) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+};
+
 const createRow = (overrides = {}) => ({
   id: uid(),
   ticker: '',

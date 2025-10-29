@@ -5,10 +5,23 @@ export const createCalc = (thresholds) => {
   return (row, forcedMarket) => {
     const marketKey = forcedMarket || row.market || 'US';
     const priceCfg = th.priceRange?.[marketKey] || th.priceRange?.US || {};
-    const marketPriceMin = typeof priceCfg.min === 'number' ? priceCfg.min : 0;
-    const marketPriceMax = typeof priceCfg.max === 'number' ? priceCfg.max : Number.POSITIVE_INFINITY;
+    const marketPriceMin = Number.isFinite(priceCfg.min) ? priceCfg.min : 0;
+    const marketPriceMax = Number.isFinite(priceCfg.max) ? priceCfg.max : Number.POSITIVE_INFINITY;
     const liqCfg = th.liquidityMin?.[marketKey];
-    const marketLiquidityMin = typeof liqCfg === 'number' ? liqCfg : 0;
+    const marketLiquidityMin = Number.isFinite(liqCfg) ? liqCfg : 0;
+    const rvolMin = Number.isFinite(th.rvolMin) ? th.rvolMin : 0;
+    const rvolIdeal = Number.isFinite(th.rvolIdeal) ? th.rvolIdeal : rvolMin;
+    const chgMin = Number.isFinite(th.chgMin) ? th.chgMin : 0;
+    const atrMin = Number.isFinite(th.atrMin) ? th.atrMin : 0;
+    const atrPctMin = Number.isFinite(th.atrPctMin) ? th.atrPctMin : 0;
+    const float50Limit = Number.isFinite(th.float50) ? th.float50 : Number.POSITIVE_INFINITY;
+    const float10Limit = Number.isFinite(th.float10) ? th.float10 : float50Limit;
+    const rotationMin = Number.isFinite(th.rotationMin) ? th.rotationMin : 0;
+    const rotationIdeal = Number.isFinite(th.rotationIdeal) ? th.rotationIdeal : Math.max(rotationMin, 0);
+    const shortMin = Number.isFinite(th.shortMin) ? th.shortMin : 0;
+    const spreadMaxPct = Number.isFinite(th.spreadMaxPct) ? th.spreadMaxPct : Number.POSITIVE_INFINITY;
+    const needEMA200 = !!th.needEMA200;
+    const parabolic50 = !!th.parabolic50;
 
     const open = toNum(row.open);
     const close = toNum(row.close);
@@ -60,7 +73,7 @@ export const createCalc = (thresholds) => {
     score += rvol5 ? 10 : 0;
     score += priceOK ? 10 : 0;
     score += emaOK ? 10 : 0;
-    score += typeof chgPct === 'number' && chgPct >= th.chgMin ? 10 : 0;
+    score += typeof chgPct === 'number' && chgPct >= chgMin ? 10 : 0;
     score += typeof chgPct === 'number' && chgPct >= 50 ? 10 : 0;
     score += atrOK ? 10 : 0;
     score += rot1 ? 5 : 0;
