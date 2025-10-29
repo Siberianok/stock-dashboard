@@ -31,7 +31,7 @@ const DEFAULT_THRESHOLDS = {
   spreadMaxPct: 1,
 };
 
-export const useThresholds = () => {
+export function useThresholds() {
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
 
   const updatePriceRange = useCallback((market, field, value) => {
@@ -90,24 +90,27 @@ export const useThresholds = () => {
     }));
   }, []);
 
-  const thresholdsKey = useMemo(() => JSON.stringify({
-    marketsEnabled: thresholds.marketsEnabled,
-    priceRange: thresholds.priceRange,
-    liquidityMin: thresholds.liquidityMin,
-    rvolMin: thresholds.rvolMin,
-    rvolIdeal: thresholds.rvolIdeal,
-    atrMin: thresholds.atrMin,
-    atrPctMin: thresholds.atrPctMin,
-    chgMin: thresholds.chgMin,
-    parabolic50: thresholds.parabolic50,
-    needEMA200: thresholds.needEMA200,
-    float50: thresholds.float50,
-    float10: thresholds.float10,
-    rotationMin: thresholds.rotationMin,
-    rotationIdeal: thresholds.rotationIdeal,
-    shortMin: thresholds.shortMin,
-    spreadMaxPct: thresholds.spreadMaxPct,
-  })), [thresholds]);
+  const thresholdsKey = useMemo(
+    () => JSON.stringify({
+      marketsEnabled: thresholds.marketsEnabled,
+      priceRange: thresholds.priceRange,
+      liquidityMin: thresholds.liquidityMin,
+      rvolMin: thresholds.rvolMin,
+      rvolIdeal: thresholds.rvolIdeal,
+      atrMin: thresholds.atrMin,
+      atrPctMin: thresholds.atrPctMin,
+      chgMin: thresholds.chgMin,
+      parabolic50: thresholds.parabolic50,
+      needEMA200: thresholds.needEMA200,
+      float50: thresholds.float50,
+      float10: thresholds.float10,
+      rotationMin: thresholds.rotationMin,
+      rotationIdeal: thresholds.rotationIdeal,
+      shortMin: thresholds.shortMin,
+      spreadMaxPct: thresholds.spreadMaxPct,
+    }),
+    [thresholds],
+  );
 
   return {
     thresholds,
@@ -119,4 +122,4 @@ export const useThresholds = () => {
     presetModerado,
     presetAgresivo,
   };
-};
+}

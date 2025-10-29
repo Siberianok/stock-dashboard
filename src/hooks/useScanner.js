@@ -1,11 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchQuotes } from '../services/yahooFinance.js';
 import { REQUIRED_FLAGS, UNIVERSE } from '../utils/constants.js';
 import { extractQuoteFields } from '../utils/quotes.js';
 
 export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
-  const [state, setState] = useState({ matches: [], loading: false, error: null, lastUpdated: null });
-  const [manualTrigger, setManualTrigger] = useState(0);
+  const [state, setState] = useState({
+    matches: [],
+    loading: false,
+    error: null,
+    lastUpdated: null,
+    lastThresholdsKey: null,
+  });
+  const latestThresholdsKeyRef = useRef(thresholdsKey);
+  const lastRequestRef = useRef({ key: thresholdsKey, id: 0 });
+
+  useEffect(() => {
+    latestThresholdsKeyRef.current = thresholdsKey;
+  }, [thresholdsKey]);
 
   const enabledMarkets = useMemo(
     () => Object.entries(thresholds.marketsEnabled || {})
@@ -14,9 +25,11 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
     [thresholds.marketsEnabled],
   );
 
-  const runScan = useCallback(async () => {
+  const runScan = useCallback(async (scanKey = latestThresholdsKeyRef.current) => {
+    const requestId = Date.now();
+    lastRequestRef.current = { key: scanKey, id: requestId };
     if (!enabledMarkets.length) {
-      setState({ matches: [], loading: false, error: null, lastUpdated: null });
+      setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
       return;
     }
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -42,21 +55,29 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         return { data, computed };
       }).filter(Boolean);
       matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
-      setState({ matches, loading: false, error: null, lastUpdated: new Date().toISOString() });
+      const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
+      if (!isLatest) {
+        return;
+      }
+      setState({ matches, loading: false, error: null, lastUpdated: new Date().toISOString(), lastThresholdsKey: scanKey });
     } catch (error) {
       console.error(error);
-      setState((prev) => ({ ...prev, loading: false, error: error?.message || 'Error al escanear universo' }));
+      const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
+      if (!isLatest) {
+        return;
+      }
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: error?.message || 'Error al escanear universo',
+        lastThresholdsKey: scanKey,
+      }));
     }
   }, [calc, enabledMarkets]);
 
   useEffect(() => {
-    runScan();
+    runScan(thresholdsKey);
   }, [runScan, thresholdsKey]);
-
-  useEffect(() => {
-    if (!manualTrigger) return;
-    runScan();
-  }, [manualTrigger, runScan]);
 
   useEffect(() => {
     const interval = window.setInterval(runScan, 60_000);
@@ -64,8 +85,8 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
   }, [runScan]);
 
   const triggerScan = useCallback(() => {
-    setManualTrigger(Date.now());
-  }, []);
+    runScan(latestThresholdsKeyRef.current);
+  }, [runScan]);
 
   return {
     state,
