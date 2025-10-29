@@ -154,13 +154,22 @@ function App() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }, [lastUpdated]);
 
-  const computedRows = useMemo(() => rows.map((row) => ({
-    row,
-    computed: calc(row, row.market || 'US'),
-    isActive: !!(thresholds.marketsEnabled?.[row.market || 'US']),
-  })), [rows, calc, thresholds.marketsEnabled]);
+  const computedRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        row,
+        computed: calc(row, row.market || 'US'),
+        isActive: thresholds.marketsEnabled?.[row.market || 'US'] !== false,
+      })),
+    [rows, calc, thresholds.marketsEnabled],
+  );
 
   const activeComputed = useMemo(() => computedRows.filter((entry) => entry.isActive), [computedRows]);
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => thresholds.marketsEnabled?.[row.market || 'US'] !== false),
+    [rows, thresholds.marketsEnabled],
+  );
 
   const kpis = useMemo(() => {
     const scores = activeComputed.map((entry) => entry.computed?.score || 0);
@@ -843,7 +852,7 @@ function App() {
         </section>
 
         <TickerTable
-          rows={rows}
+          rows={visibleRows}
           thresholds={thresholds}
           selectedId={selectedId}
           onSelect={setSelectedId}
