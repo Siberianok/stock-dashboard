@@ -25,3 +25,16 @@ npm run build
 ```
 
 ## Estructura
+
+```
+.
+├── src/
+│   ├── components/        # UI reutilizable (tablas, badges, visualizaciones)
+│   ├── hooks/             # Lógica de estado y presets de thresholds
+│   ├── services/          # Integraciones externas (Yahoo Finance)
+│   ├── utils/             # Helpers de formato, cálculos y constantes
+│   └── App.jsx            # Layout principal del dashboard
+├── tests/                 # Pruebas con node:test
+├── index.html             # Entry point de Vite
+└── vite.config.js         # Configuración del bundler
+```

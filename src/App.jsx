@@ -22,12 +22,7 @@ import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
-
-const Badge = ({ ok, label }) => (
-  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>
-    {label}
-  </span>
-);
+import { Badge } from './components/Badge.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -125,65 +120,16 @@ const useTickerRows = () => {
   return { rows, setRows, addRow, clearRows, updateRow };
 };
 
-const useValidationState = () => {
-  const [errors, setErrors] = useState({});
-  const setFieldError = useCallback((key, message) => {
-    setErrors((prev) => {
-      if (!message) {
-        if (!(key in prev)) return prev;
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      }
-      if (prev[key] === message) return prev;
-      return { ...prev, [key]: message };
-    });
-  }, []);
-  const applyNumericUpdate = useCallback((key, rawValue, updater, options = {}) => {
-    const {
-      min = 0,
-      max = Number.POSITIVE_INFINITY,
-      allowEmpty = true,
-      allowZero = true,
-      formatter = (val) => (val ?? '').toString(),
-      validate,
-    } = options;
-    if (rawValue === undefined) {
-      if (allowEmpty) {
-        setFieldError(key, null);
-        updater(undefined);
-      } else {
-        setFieldError(key, 'Requerido');
-      }
-      return;
-    }
-    if (!Number.isFinite(rawValue)) {
-      setFieldError(key, 'Valor inválido');
-      return;
-    }
-    if ((!allowZero && rawValue === 0) || rawValue < min) {
-      const label = !allowZero && rawValue === 0
-        ? 'Debe ser mayor a 0'
-        : `Debe ser ≥ ${formatter(min)}`;
-      setFieldError(key, label);
-      return;
-    }
-    if (rawValue > max) {
-      setFieldError(key, `Debe ser ≤ ${formatter(max)}`);
-      return;
-    }
-    if (validate) {
-      const customMessage = validate(rawValue);
-      if (customMessage) {
-        setFieldError(key, customMessage);
-        return;
-      }
-    }
-    setFieldError(key, null);
-    updater(rawValue);
-  }, [setFieldError]);
-  const getError = useCallback((key) => errors[key], [errors]);
-  return { errors, applyNumericUpdate, getError };
+const toCSVCell = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  const str = typeof value === 'string' ? value : String(value);
+  const sanitized = str.replace(/\r?\n/g, '\n');
+  if (/[",\n]/.test(sanitized)) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
 };
 
 function App() {
@@ -524,7 +470,7 @@ function App() {
       const market = row.market || 'US';
       const info = MARKETS[market] || MARKETS.US;
       const { rvol, atrPct, chgPct, rotation, score, flags } = calc(row, market);
-      lines.push([
+      const cells = [
         row.ticker,
         info.label,
         info.currency,
@@ -563,7 +509,8 @@ function App() {
         flags.shortOK,
         flags.spreadOK,
         flags.liqOK,
-      ].join(','));
+      ];
+      lines.push(cells.map(toCSVCell).join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

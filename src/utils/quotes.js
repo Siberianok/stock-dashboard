@@ -7,7 +7,8 @@ export const extractQuoteFields = (quote) => {
   const volToday = toNum(quote.regularMarketVolume);
   const volAvg10 = toNum(quote.averageDailyVolume10Day);
   const volAvg3m = toNum(quote.averageDailyVolume3Month);
-  const floatShares = toNum(quote.floatShares || quote.sharesOutstanding);
+  const floatRaw = quote.floatShares ?? quote.sharesOutstanding;
+  const floatShares = toNum(floatRaw);
   const shortPct = toNum(quote.shortPercentOfFloat);
   const sharesShort = toNum(quote.sharesShort);
   const avgVolForDtc = volAvg10 || volAvg3m;

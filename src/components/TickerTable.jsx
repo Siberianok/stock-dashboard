@@ -3,12 +3,7 @@ import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
-
-const Badge = ({ ok, label }) => (
-  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ok ? COLORS.badgeOK : COLORS.badgeNO}`}>
-    {label}
-  </span>
-);
+import { Badge } from './Badge.jsx';
 
 const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
   const market = row.market || 'US';

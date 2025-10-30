@@ -64,26 +64,38 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
       setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
       return;
     }
-    setState((prev) => ({ ...prev, loading: true, error: null }));
-    const controller = new AbortController();
-    abortRef.current = controller;
+    setState((prev) => ({ ...prev, loading: true, error: null, lastThresholdsKey: scanKey }));
     try {
-      const { matches, error: quotesError } = await scanUniverse({
-        enabledMarkets,
-        calc,
-        fetcher: (symbols, options) => fetchQuotes(symbols, { ...options, signal: controller.signal }),
-      });
-      setState({
-        matches,
-        loading: false,
-        error: quotesError || null,
-        lastUpdated: new Date().toISOString(),
-        lastThresholdsKey: scanKey,
-      });
-    } catch (error) {
-      if (error?.name === 'AbortError') {
+      const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
+      if (!entries.length) {
+        setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
         return;
       }
+      const symbolToMarket = Object.fromEntries(entries);
+      const symbols = entries.map(([symbol]) => symbol);
+      const { quotes, error: quotesError } = await fetchQuotes(symbols, { force: true });
+      const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
+      if (!isLatest) {
+        return;
+      }
+      const matches = symbols.map((symbol) => {
+        const quote = quotes[symbol];
+        if (!quote) return null;
+        const market = symbolToMarket[symbol] || 'US';
+        const fields = extractQuoteFields(quote);
+        const data = { ticker: symbol, market, ...fields };
+        const computed = calc(data, market);
+        const flags = computed?.flags || {};
+        const passes = REQUIRED_FLAGS.every((flag) => {
+          if (flag === 'shortOK' && flags.shortMissing) return true;
+          return Boolean(flags[flag]);
+        });
+        if (!passes) return null;
+        return { data, computed };
+      }).filter(Boolean);
+      matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
+      setState({ matches, loading: false, error: quotesError || null, lastUpdated: new Date().toISOString(), lastThresholdsKey: scanKey });
+    } catch (error) {
       console.error(error);
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
       if (!isLatest) {
