@@ -43,6 +43,57 @@ const parseNumberInput = (input) => {
   return Number.isFinite(num) ? num : undefined;
 };
 
+const formatValueForError = (value, formatter) => {
+  try {
+    return formatter(value);
+  } catch (error) {
+    return String(value);
+  }
+};
+
+const validateNumericValue = (value, options = {}) => {
+  const {
+    allowEmpty = true,
+    allowZero = true,
+    min = Number.NEGATIVE_INFINITY,
+    max = Number.POSITIVE_INFINITY,
+    formatter = (val) => (typeof val === 'number' ? val.toString() : String(val)),
+    validate,
+  } = options;
+
+  if (value === undefined || value === null || value === '') {
+    if (allowEmpty) {
+      return { error: null, value: undefined };
+    }
+    return { error: 'Requerido', value: undefined };
+  }
+
+  if (!Number.isFinite(value)) {
+    return { error: 'Debe ser un número válido', value: undefined };
+  }
+
+  if (!allowZero && value === 0) {
+    return { error: 'Debe ser mayor a 0', value: undefined };
+  }
+
+  if (Number.isFinite(min) && value < min) {
+    return { error: `Debe ser ≥ ${formatValueForError(min, formatter)}`, value: undefined };
+  }
+
+  if (Number.isFinite(max) && value > max) {
+    return { error: `Debe ser ≤ ${formatValueForError(max, formatter)}`, value: undefined };
+  }
+
+  if (typeof validate === 'function') {
+    const customError = validate(value);
+    if (typeof customError === 'string' && customError.trim()) {
+      return { error: customError, value: undefined };
+    }
+  }
+
+  return { error: null, value };
+};
+
 const ROWS_STORAGE_KEY = 'selector.rows.v1';
 const SELECTED_ROW_STORAGE_KEY = 'selector.selectedRowId.v1';
 const isBrowser = typeof window !== 'undefined';
@@ -136,7 +187,36 @@ function App() {
   const { thresholds, thresholdsKey, updatePriceRange, updateLiquidityMin, toggleMarket, presetModerado, presetAgresivo, setThresholds } = useThresholds();
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
-  const { applyNumericUpdate, getError } = useValidationState();
+  const [validationErrors, setValidationErrors] = useState({});
+  const setFieldError = useCallback((key, message) => {
+    setValidationErrors((prev) => {
+      if (message) {
+        if (prev[key] === message) {
+          return prev;
+        }
+        return { ...prev, [key]: message };
+      }
+      if (!(key in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const applyNumericUpdate = useCallback((key, value, onValid, options = {}) => {
+    const { error, value: nextValue } = validateNumericValue(value, options);
+    if (error) {
+      setFieldError(key, error);
+      return;
+    }
+
+    setFieldError(key, null);
+    onValid(nextValue);
+  }, [setFieldError]);
+
+  const getError = useCallback((key) => validationErrors[key] || null, [validationErrors]);
   const [selectedId, setSelectedId] = useState(() => {
     if (!isBrowser) return null;
     const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
