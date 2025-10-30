@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   ResponsiveContainer,
   Tooltip,
@@ -43,6 +43,10 @@ const parseNumberInput = (input) => {
   return Number.isFinite(num) ? num : undefined;
 };
 
+const ROWS_STORAGE_KEY = 'selector.rows.v1';
+const SELECTED_ROW_STORAGE_KEY = 'selector.selectedRowId.v1';
+const isBrowser = typeof window !== 'undefined';
+
 const createRow = (overrides = {}) => ({
   id: uid(),
   ticker: '',
@@ -53,7 +57,7 @@ const createRow = (overrides = {}) => ({
   ask: undefined,
   avgPrice: undefined,
   volToday: undefined,
-  volAvg20: undefined,
+  volAvg10: undefined,
   floatM: undefined,
   shortPct: undefined,
   dtc: undefined,
@@ -69,8 +73,30 @@ const createRow = (overrides = {}) => ({
   ...overrides,
 });
 
+const loadStoredRows = () => {
+  if (!isBrowser) return null;
+  try {
+    const raw = window.localStorage.getItem(ROWS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .map((entry) => (entry && typeof entry === 'object' ? createRow({ ...entry, id: entry.id || uid() }) : null))
+      .filter(Boolean);
+  } catch (error) {
+    console.error('No se pudieron leer filas guardadas', error);
+    return null;
+  }
+};
+
 const useTickerRows = () => {
-  const [rows, setRowsInternal] = useState([createRow()]);
+  const [rows, setRowsInternal] = useState(() => {
+    const stored = loadStoredRows();
+    if (stored && stored.length) {
+      return stored;
+    }
+    return [createRow()];
+  });
   const setRows = useCallback((updater) => {
     setRowsInternal((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -82,6 +108,15 @@ const useTickerRows = () => {
   const updateRow = useCallback((id, key, value) => {
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, [key]: value } : row)));
   }, [setRows]);
+  useEffect(() => {
+    if (!isBrowser) return;
+    try {
+      const serializable = rows.map((row) => ({ ...row }));
+      window.localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(serializable));
+    } catch (error) {
+      console.error('No se pudieron guardar las filas', error);
+    }
+  }, [rows]);
   return { rows, setRows, addRow, clearRows, updateRow };
 };
 
@@ -101,10 +136,39 @@ function App() {
   const { thresholds, thresholdsKey, updatePriceRange, updateLiquidityMin, toggleMarket, presetModerado, presetAgresivo, setThresholds } = useThresholds();
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
-  const [selectedId, setSelectedId] = useState(null);
+  const { applyNumericUpdate, getError } = useValidationState();
+  const [selectedId, setSelectedId] = useState(() => {
+    if (!isBrowser) return null;
+    const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
+    return stored || null;
+  });
   const [refreshToken, setRefreshToken] = useState(0);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [fetchError, setFetchError] = useState(null);
+  const quotesAbortRef = useRef(null);
+
+  useEffect(() => {
+    if (!rows.length) return;
+    setSelectedId((prev) => {
+      if (prev && rows.some((row) => row.id === prev)) {
+        return prev;
+      }
+      return rows[0].id;
+    });
+  }, [rows]);
+
+  useEffect(() => {
+    if (!isBrowser) return;
+    try {
+      if (!selectedId) {
+        window.localStorage.removeItem(SELECTED_ROW_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(SELECTED_ROW_STORAGE_KEY, selectedId);
+      }
+    } catch (error) {
+      console.error('No se pudo guardar la selección de fila', error);
+    }
+  }, [selectedId]);
 
   const tickers = useMemo(() => rows.map((r) => r.ticker).filter(Boolean), [rows]);
   const tickersKey = tickers.join(',');
@@ -113,16 +177,28 @@ function App() {
     if (!tickersKey) {
       setFetchError(null);
       setLoadingQuotes(false);
-      return undefined;
+      if (quotesAbortRef.current) {
+        quotesAbortRef.current.abort();
+        quotesAbortRef.current = null;
+      }
+      return () => {};
     }
     let active = true;
     const load = async (force) => {
+      if (!active) return;
+      if (quotesAbortRef.current) {
+        quotesAbortRef.current.abort();
+        quotesAbortRef.current = null;
+      }
+      const controller = new AbortController();
+      quotesAbortRef.current = controller;
       try {
-        if (!active) return;
         setLoadingQuotes(true);
         setFetchError(null);
-        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force });
-        if (!active) return;
+        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force, signal: controller.signal });
+        if (!active || quotesAbortRef.current !== controller || controller.signal.aborted) {
+          return;
+        }
         const staleSet = new Set((staleSymbols || []).map((symbol) => symbol.toUpperCase()));
         setRows((prev) => prev.map((row) => {
           const symbolKey = row.ticker ? row.ticker.toUpperCase() : row.ticker;
@@ -134,12 +210,17 @@ function App() {
         }));
         setFetchError(quotesError || null);
       } catch (error) {
+        if (!active || quotesAbortRef.current !== controller || error?.name === 'AbortError') {
+          return;
+        }
         console.error(error);
-        if (!active) return;
         setFetchError(error?.message || 'Error al actualizar datos');
       } finally {
         if (!active) return;
-        setLoadingQuotes(false);
+        if (quotesAbortRef.current === controller) {
+          quotesAbortRef.current = null;
+          setLoadingQuotes(false);
+        }
       }
     };
     load(refreshToken !== 0);
@@ -147,6 +228,10 @@ function App() {
     return () => {
       active = false;
       window.clearInterval(interval);
+      if (quotesAbortRef.current) {
+        quotesAbortRef.current.abort();
+        quotesAbortRef.current = null;
+      }
     };
   }, [tickersKey, refreshToken, tickers, setRows]);
 
@@ -284,9 +369,101 @@ function App() {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
   }, [calc, setRows]);
 
+  const volumeInputs = [
+    {
+      key: 'rvolMin',
+      label: 'RVOL ≥',
+      value: thresholds.rvolMin,
+      step: '0.1',
+      min: 0,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolMin: value })),
+    },
+    {
+      key: 'rvolIdeal',
+      label: 'RVOL ideal ≥',
+      value: thresholds.rvolIdeal,
+      step: '0.1',
+      min: thresholds.rvolMin || 0,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      validate: (value) => {
+        const minVal = thresholds.rvolMin;
+        if (Number.isFinite(minVal) && value < minVal) {
+          return `Debe ser ≥ ${fmt(minVal, 1)}`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolIdeal: value })),
+    },
+    {
+      key: 'float50',
+      label: 'Float < (M)',
+      value: thresholds.float50,
+      step: '1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 0),
+      validate: (value) => {
+        const pref = thresholds.float10;
+        if (Number.isFinite(pref) && value < pref) {
+          return `Debe ser ≥ pref (${fmt(pref, 0)})`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, float50: value })),
+    },
+    {
+      key: 'float10',
+      label: 'Pref. Float < (M)',
+      value: thresholds.float10,
+      step: '1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 0),
+      max: thresholds.float50,
+      validate: (value) => {
+        const maxVal = thresholds.float50;
+        if (Number.isFinite(maxVal) && value > maxVal) {
+          return `Debe ser ≤ máx (${fmt(maxVal, 0)})`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, float10: value })),
+    },
+    {
+      key: 'rotationMin',
+      label: 'Rotación ≥',
+      value: thresholds.rotationMin,
+      step: '0.1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationMin: value })),
+    },
+    {
+      key: 'rotationIdeal',
+      label: 'Rotación ideal ≥',
+      value: thresholds.rotationIdeal,
+      step: '0.1',
+      min: thresholds.rotationMin || 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      validate: (value) => {
+        const minVal = thresholds.rotationMin;
+        if (Number.isFinite(minVal) && value < minVal) {
+          return `Debe ser ≥ ${fmt(minVal, 1)}`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationIdeal: value })),
+    },
+  ];
+
   const exportCSV = useCallback(() => {
     const headers = [
-      'Ticker','Mercado','Moneda','Open','Close','Bid','Ask','Promedio','VolHoy','VolProm20','RVOL','Float(M)','Rotación','Short%','DTC','ATR14','ATR%','EMA9','EMA200','%día','Catal','IntradíaOK','Spread%','Liquidez(M)','SCORE','priceOK','emaOK','rvol2','rvol5','chgOK','atrOK','float<50','float<10','rot≥1','rot≥3','shortOK','spreadOK','liqOK',
+      'Ticker','Mercado','Moneda','Open','Close','Bid','Ask','Promedio','VolHoy','VolProm10','RVOL','Float(M)','Rotación','Short%','DTC','ATR14','ATR%','EMA9','EMA200','%día','Catal','IntradíaOK','Spread%','Liquidez(M)','SCORE','priceOK','emaOK','rvol2','rvol5','chgOK','atrOK','float<50','float<10','rot≥1','rot≥3','shortOK','spreadOK','liqOK',
     ];
     const lines = [headers.join(',')];
     rows.forEach((row) => {
@@ -303,7 +480,7 @@ function App() {
         row.ask,
         row.avgPrice,
         row.volToday,
-        row.volAvg20,
+        row.volAvg10,
         fmt(rvol),
         row.floatM,
         fmt(rotation, 2),
@@ -356,7 +533,7 @@ function App() {
         ask: 23.5,
         avgPrice: 21.8,
         volToday: 128000000,
-        volAvg20: 36000000,
+        volAvg10: 36000000,
         floatM: 25,
         shortPct: 22,
         dtc: 2.4,
@@ -379,7 +556,7 @@ function App() {
         ask: 20.0,
         avgPrice: 18.7,
         volToday: 82000000,
-        volAvg20: 27000000,
+        volAvg10: 27000000,
         floatM: 48,
         shortPct: 12,
         dtc: 1.6,
@@ -402,7 +579,7 @@ function App() {
         ask: 1670,
         avgPrice: 1570,
         volToday: 1800000,
-        volAvg20: 540000,
+        volAvg10: 540000,
         floatM: 1.5,
         shortPct: 8,
         dtc: 1.2,
@@ -425,7 +602,7 @@ function App() {
         ask: 31.7,
         avgPrice: 29.9,
         volToday: 54000000,
-        volAvg20: 18000000,
+        volAvg10: 18000000,
         floatM: 35,
         shortPct: 6,
         dtc: 1.1,
@@ -448,7 +625,7 @@ function App() {
         ask: 164.2,
         avgPrice: 156.5,
         volToday: 6200000,
-        volAvg20: 2200000,
+        volAvg10: 2200000,
         floatM: 4.5,
         shortPct: 4,
         dtc: 0.8,
@@ -471,7 +648,7 @@ function App() {
         ask: 205.2,
         avgPrice: 195.5,
         volToday: 102000000,
-        volAvg20: 42000000,
+        volAvg10: 42000000,
         floatM: 30,
         shortPct: 14,
         dtc: 2.1,
@@ -530,7 +707,12 @@ function App() {
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
                       <span className="font-medium">{info.label}</span>
-                      <input type="checkbox" checked={!!thresholds.marketsEnabled?.[key]} onChange={(e) => toggleMarket(key, e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        aria-label={`Habilitar mercado ${info.label}`}
+                        checked={!!thresholds.marketsEnabled?.[key]}
+                        onChange={(e) => toggleMarket(key, e.target.checked)}
+                      />
                     </label>
                   ))}
                 </div>
@@ -541,15 +723,75 @@ function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <div key={key} className="space-y-2 bg-white/5 rounded-xl p-3">
-                      <div className="text-center text-white/70 text-xs uppercase tracking-wide">{info.label}</div>
-                      <label className="flex flex-col gap-1 text-xs">
-                        <span className="text-white/80">Mínimo</span>
-                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.min ?? ''} onChange={(e) => updatePriceRange(key, 'min', parseNumberInput(e))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs">
-                        <span className="text-white/80">Máximo</span>
-                        <input type="number" step="0.1" value={thresholds.priceRange?.[key]?.max ?? ''} onChange={(e) => updatePriceRange(key, 'max', parseNumberInput(e))} className="border border-white/20 bg-white/10 text-white rounded px-2 py-1" />
-                      </label>
+                      {(() => {
+                        const priceRange = thresholds.priceRange?.[key] || {};
+                        const minKey = `price-${key}-min`;
+                        const maxKey = `price-${key}-max`;
+                        const minError = getError(minKey);
+                        const maxError = getError(maxKey);
+                        const formatNumber = (val) => fmt(val, 2);
+                        return (
+                          <>
+                            <div className="text-center text-white/70 text-xs uppercase tracking-wide">{info.label}</div>
+                            <label className="flex flex-col gap-1 text-xs">
+                              <span className="text-white/80">Mínimo</span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.1"
+                                min="0"
+                                aria-label={`Precio mínimo ${info.label}`}
+                                value={priceRange.min ?? ''}
+                                onChange={(e) => {
+                                  const nextValue = parseNumberInput(e);
+                                  applyNumericUpdate(minKey, nextValue, (validValue) => updatePriceRange(key, 'min', validValue), {
+                                    min: 0,
+                                    allowEmpty: false,
+                                    formatter: formatNumber,
+                                    validate: (val) => {
+                                      const maxVal = thresholds.priceRange?.[key]?.max;
+                                      if (Number.isFinite(maxVal) && val > maxVal) {
+                                        return `Debe ser ≤ ${formatNumber(maxVal)}`;
+                                      }
+                                      return null;
+                                    },
+                                  });
+                                }}
+                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                              />
+                              {minError ? <span className="text-[10px] text-rose-300">{minError}</span> : null}
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs">
+                              <span className="text-white/80">Máximo</span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.1"
+                                min="0"
+                                aria-label={`Precio máximo ${info.label}`}
+                                value={priceRange.max ?? ''}
+                                onChange={(e) => {
+                                  const nextValue = parseNumberInput(e);
+                                  applyNumericUpdate(maxKey, nextValue, (validValue) => updatePriceRange(key, 'max', validValue), {
+                                    min: 0,
+                                    allowEmpty: false,
+                                    formatter: formatNumber,
+                                    validate: (val) => {
+                                      const minVal = thresholds.priceRange?.[key]?.min;
+                                      if (Number.isFinite(minVal) && val < minVal) {
+                                        return `Debe ser ≥ ${formatNumber(minVal)}`;
+                                      }
+                                      return null;
+                                    },
+                                  });
+                                }}
+                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                              />
+                              {maxError ? <span className="text-[10px] text-rose-300">{maxError}</span> : null}
+                            </label>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -560,126 +802,40 @@ function App() {
               <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
                 <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">RVOL ≥</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={thresholds.rvolMin ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.rvolMin;
-                            return next;
-                          }
-                          return { ...prev, rvolMin: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">RVOL ideal ≥</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={thresholds.rvolIdeal ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.rvolIdeal;
-                            return next;
-                          }
-                          return { ...prev, rvolIdeal: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Float &lt; (M)</span>
-                    <input
-                      type="number"
-                      step="1"
-                      value={thresholds.float50 ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.float50;
-                            return next;
-                          }
-                          return { ...prev, float50: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Pref. Float &lt; (M)</span>
-                    <input
-                      type="number"
-                      step="1"
-                      value={thresholds.float10 ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.float10;
-                            return next;
-                          }
-                          return { ...prev, float10: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Rotación ≥</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={thresholds.rotationMin ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.rotationMin;
-                            return next;
-                          }
-                          return { ...prev, rotationMin: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Rotación ideal ≥</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={thresholds.rotationIdeal ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.rotationIdeal;
-                            return next;
-                          }
-                          return { ...prev, rotationIdeal: nextValue };
-                        });
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                  </label>
+                  {volumeInputs.map((field) => {
+                    const error = getError(field.key);
+                    return (
+                      <label key={field.key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                        <span className="text-white/80 font-medium">{field.label}</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step={field.step}
+                          min={field.min ?? 0}
+                          aria-label={field.label}
+                          value={field.value ?? ''}
+                          onChange={(e) => {
+                            const nextValue = parseNumberInput(e);
+                            applyNumericUpdate(
+                              field.key,
+                              nextValue,
+                              (validValue) => field.onValid(validValue),
+                              {
+                                min: field.min ?? 0,
+                                max: field.max ?? Number.POSITIVE_INFINITY,
+                                allowEmpty: false,
+                                allowZero: field.allowZero ?? true,
+                                formatter: field.formatter || ((val) => fmt(val, 2)),
+                                validate: field.validate,
+                              },
+                            );
+                          }}
+                          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                        />
+                        {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -689,7 +845,32 @@ function App() {
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                       <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
-                      <input type="number" step="0.5" value={thresholds.liquidityMin?.[key] ?? ''} onChange={(e) => updateLiquidityMin(key, parseNumberInput(e))} className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center" />
+                      {(() => {
+                        const errorKey = `liq-${key}`;
+                        const error = getError(errorKey);
+                        return (
+                          <>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.5"
+                              min="0"
+                              aria-label={`Liquidez mínima ${info.label}`}
+                              value={thresholds.liquidityMin?.[key] ?? ''}
+                              onChange={(e) => {
+                                const nextValue = parseNumberInput(e);
+                                applyNumericUpdate(errorKey, nextValue, (validValue) => updateLiquidityMin(key, validValue), {
+                                  min: 0,
+                                  allowEmpty: false,
+                                  formatter: (val) => fmt(val, 1),
+                                });
+                              }}
+                              className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                            />
+                            {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
+                          </>
+                        );
+                      })()}
                     </label>
                   ))}
                   <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
@@ -697,27 +878,43 @@ function App() {
                     <input
                       type="number"
                       step="0.1"
+                      min="0"
+                      inputMode="decimal"
+                      aria-label="Spread máximo permitido"
                       value={thresholds.spreadMaxPct ?? ''}
                       onChange={(e) => {
                         const nextValue = parseNumberInput(e);
-                        setThresholds((prev) => {
-                          if (nextValue === undefined) {
-                            const next = { ...prev };
-                            delete next.spreadMaxPct;
-                            return next;
-                          }
-                          return { ...prev, spreadMaxPct: nextValue };
-                        });
+                        applyNumericUpdate(
+                          'spreadMaxPct',
+                          nextValue,
+                          (validValue) => setThresholds((prev) => ({ ...prev, spreadMaxPct: validValue })),
+                          {
+                            min: 0,
+                            allowEmpty: false,
+                            formatter: (val) => fmt(val, 2),
+                          },
+                        );
                       }}
                       className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
                     />
+                    {getError('spreadMaxPct') ? <span className="text-[10px] text-rose-300">{getError('spreadMaxPct')}</span> : null}
                   </label>
                   <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input type="checkbox" checked={thresholds.needEMA200} onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))} />
+                    <input
+                      type="checkbox"
+                      aria-label="Requerir precio mayor a EMA200"
+                      checked={thresholds.needEMA200}
+                      onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))}
+                    />
                     <span>Requerir precio &gt; EMA200</span>
                   </label>
                   <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input type="checkbox" checked={thresholds.parabolic50} onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))} />
+                    <input
+                      type="checkbox"
+                      aria-label="Activar modo parabólico"
+                      checked={thresholds.parabolic50}
+                      onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))}
+                    />
                     <span>Modo parabólico (≥ 50%)</span>
                   </label>
                 </div>

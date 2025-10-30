@@ -1,7 +1,19 @@
 import { toNum } from './format.js';
 
+const formatSignaturePart = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(6);
+  }
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value);
+};
+
 export const createCalc = (thresholds) => {
   const th = thresholds;
+  const cache = new Map();
+
   return (row, forcedMarket) => {
     const marketKey = forcedMarket || row.market || 'US';
     const priceCfg = th.priceRange?.[marketKey] || th.priceRange?.US || {};
@@ -26,17 +38,20 @@ export const createCalc = (thresholds) => {
     const open = toNum(row.open);
     const close = toNum(row.close);
     const volToday = toNum(row.volToday);
-    const volAvg20 = toNum(row.volAvg20);
+    const volAvg10 = toNum(row.volAvg10);
     const floatM = toNum(row.floatM);
     const atr14 = toNum(row.atr14);
     const ema9 = toNum(row.ema9);
     const ema200 = toNum(row.ema200);
     const shortPct = toNum(row.shortPct);
+    const spreadPct = toNum(row.spreadPct);
+    const liqM = toNum(row.liqM);
+
     const rotation = typeof volToday === 'number' && typeof floatM === 'number' && floatM > 0
       ? volToday / (floatM * 1e6)
       : undefined;
-    const rvol = typeof volToday === 'number' && typeof volAvg20 === 'number' && volAvg20 > 0
-      ? volToday / volAvg20
+    const rvol = typeof volToday === 'number' && typeof volAvg10 === 'number' && volAvg10 > 0
+      ? volToday / volAvg10
       : undefined;
     const atrPct = typeof atr14 === 'number' && typeof close === 'number' && close > 0
       ? (atr14 / close) * 100
@@ -44,8 +59,35 @@ export const createCalc = (thresholds) => {
     const chgPct = typeof open === 'number' && typeof close === 'number' && open > 0
       ? ((close - open) / open) * 100
       : undefined;
-    const spreadPct = toNum(row.spreadPct);
-    const liqM = toNum(row.liqM);
+
+    const cacheKey = row.id || `${row.ticker || ''}-${marketKey}`;
+    const signature = [
+      marketKey,
+      row.id,
+      row.ticker,
+      open,
+      close,
+      volToday,
+      volAvg10,
+      floatM,
+      atr14,
+      ema9,
+      ema200,
+      shortPct,
+      spreadPct,
+      liqM,
+      rotation,
+      rvol,
+      atrPct,
+      chgPct,
+      row.intradiaOK ? 1 : 0,
+      row.catalyst ? 1 : 0,
+    ].map(formatSignaturePart).join('|');
+
+    const cached = cache.get(cacheKey);
+    if (cached?.signature === signature) {
+      return cached.result;
+    }
 
     const priceOK = typeof close === 'number' && close >= marketPriceMin && close <= marketPriceMax;
     const emaOK = typeof close === 'number'
@@ -67,21 +109,6 @@ export const createCalc = (thresholds) => {
     const spreadOK = typeof spreadPct !== 'number' ? true : spreadPct <= spreadMaxPct;
     const liqOK = typeof liqM !== 'number' ? true : liqM >= marketLiquidityMin;
 
-    let score = 0;
-    score += float10 ? 20 : (float50 ? 10 : 0);
-    score += rvol2 ? 15 : 0;
-    score += rvol5 ? 10 : 0;
-    score += priceOK ? 10 : 0;
-    score += emaOK ? 10 : 0;
-    score += typeof chgPct === 'number' && chgPct >= chgMin ? 10 : 0;
-    score += typeof chgPct === 'number' && chgPct >= 50 ? 10 : 0;
-    score += atrOK ? 10 : 0;
-    score += rot1 ? 5 : 0;
-    score += rot3 ? 5 : 0;
-    score += shortOK ? 5 : 0;
-    score += row.intradiaOK ? 5 : 0;
-    score += row.catalyst ? 5 : 0;
-
     const flags = {
       priceOK,
       emaOK,
@@ -98,7 +125,84 @@ export const createCalc = (thresholds) => {
       spreadOK,
       liqOK,
     };
-    return {
+
+    const requiredWeights = {
+      priceOK: 14,
+      emaOK: 14,
+      rvol2: 16,
+      chgOK: 10,
+      atrOK: 8,
+      float50: 8,
+      rot1: 6,
+      shortOK: 6,
+      spreadOK: 6,
+      liqOK: 6,
+    };
+    const optionalWeights = {
+      rvol5: 6,
+      float10: 10,
+      rot3: 4,
+    };
+
+    let score = 0;
+    let penalty = 0;
+
+    Object.entries(requiredWeights).forEach(([flag, weight]) => {
+      if (flags[flag]) {
+        score += weight;
+      } else {
+        penalty += weight * 0.6;
+      }
+    });
+
+    Object.entries(optionalWeights).forEach(([flag, weight]) => {
+      if (flags[flag]) {
+        score += weight;
+      }
+    });
+
+    if (row.intradiaOK) {
+      score += 4;
+    }
+    if (row.catalyst) {
+      score += 6;
+    }
+
+    if (typeof rvol === 'number' && rvolMin > 0) {
+      const target = Math.max(rvolIdeal || rvolMin, rvolMin);
+      if (target > 0) {
+        const ratio = Math.min(rvol / target, 2);
+        score += Math.max(0, ratio * 6);
+      }
+    }
+
+    if (typeof chgPct === 'number') {
+      const base = parabolic50 ? 50 : chgMin;
+      if (Number.isFinite(base) && chgPct > base) {
+        score += Math.min(8, (chgPct - base) * 0.3);
+      }
+    }
+
+    if (typeof atrPct === 'number' && atrPctMin > 0) {
+      if (atrPct > atrPctMin) {
+        score += Math.min(6, (atrPct - atrPctMin) * 0.5);
+      }
+    } else if (typeof atr14 === 'number' && atrMin > 0 && atr14 > atrMin) {
+      score += Math.min(6, (atr14 - atrMin) * 0.5);
+    }
+
+    if (typeof rotation === 'number' && rotationMin > 0 && rotation > rotationMin) {
+      score += Math.min(6, (rotation - rotationMin) * 2);
+    }
+
+    if (!shortMissing && !shortOK) {
+      penalty += 4;
+    }
+
+    score -= penalty;
+    score = Math.max(0, Math.min(120, score));
+
+    const result = {
       rvol,
       atrPct,
       chgPct,
@@ -109,5 +213,8 @@ export const createCalc = (thresholds) => {
       priceLimits: { min: marketPriceMin, max: marketPriceMax },
       liquidityMin: marketLiquidityMin,
     };
+
+    cache.set(cacheKey, { signature, result });
+    return result;
   };
 };

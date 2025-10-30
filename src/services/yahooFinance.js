@@ -1,40 +1,85 @@
 const CACHE_TTL = 30_000;
 const MAX_SYMBOLS_PER_REQUEST = 50;
+const MAX_RETRIES = 2;
+const BASE_BACKOFF_MS = 400;
+const RATE_LIMIT_STATUS = 429;
 
 const cache = new Map(); // symbol -> { timestamp, data }
-const inflight = new Map(); // key -> promise
 
 const normalizeSymbol = (symbol) => symbol?.toUpperCase().trim();
 
-const fetchChunk = async (symbols) => {
-  const key = symbols.sort().join(',');
-  if (inflight.has(key)) {
-    return inflight.get(key);
-  }
-  const promise = (async () => {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(','))}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const json = await response.json();
-    const result = json?.quoteResponse?.result || [];
-    result.forEach((quote) => {
-      if (quote?.symbol) {
-        cache.set(quote.symbol.toUpperCase(), { timestamp: Date.now(), data: quote });
-      }
-    });
-    return result;
-  })()
-    .finally(() => {
-      inflight.delete(key);
-    });
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  inflight.set(key, promise);
-  return promise;
+class RateLimitError extends Error {
+  constructor(retryAfter) {
+    super('Límite de consultas de Yahoo alcanzado');
+    this.name = 'RateLimitError';
+    this.retryAfter = retryAfter;
+  }
+}
+
+const fetchChunk = async (symbols, { signal } = {}) => {
+  const controller = new AbortController();
+  const { signal: requestSignal } = controller;
+
+  let abortListener;
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      abortListener = () => controller.abort(signal.reason);
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
+  }
+
+  try {
+    const sortedSymbols = symbols.slice().sort();
+    const joined = encodeURIComponent(sortedSymbols.join(','));
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${joined}`;
+
+    let attempt = 0;
+    for (;;) {
+      try {
+        const response = await fetch(url, { signal: requestSignal });
+        if (response.status === RATE_LIMIT_STATUS) {
+          const retryAfterHeader = response.headers?.get('Retry-After');
+          const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined;
+          throw new RateLimitError(Number.isFinite(retryAfter) ? retryAfter : undefined);
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const json = await response.json();
+        const result = json?.quoteResponse?.result || [];
+        result.forEach((quote) => {
+          if (quote?.symbol) {
+            cache.set(quote.symbol.toUpperCase(), { timestamp: Date.now(), data: quote });
+          }
+        });
+        return result;
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          throw error;
+        }
+        if (error instanceof RateLimitError) {
+          throw error;
+        }
+        if (attempt >= MAX_RETRIES) {
+          throw error;
+        }
+        const wait = BASE_BACKOFF_MS * 2 ** attempt;
+        attempt += 1;
+        await delay(wait);
+      }
+    }
+  } finally {
+    if (signal && abortListener) {
+      signal.removeEventListener('abort', abortListener);
+    }
+  }
 };
 
-export const fetchQuotes = async (inputSymbols, { force = false } = {}) => {
+export const fetchQuotes = async (inputSymbols, { force = false, signal } = {}) => {
   const symbols = Array.from(new Set((inputSymbols || []).map(normalizeSymbol).filter(Boolean)));
   if (!symbols.length) {
     return { quotes: {}, error: null, staleSymbols: [] };
@@ -61,12 +106,14 @@ export const fetchQuotes = async (inputSymbols, { force = false } = {}) => {
   for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
     const chunk = missing.slice(i, i + MAX_SYMBOLS_PER_REQUEST);
     if (chunk.length) {
-      chunkTasks.push({ symbols: chunk, promise: fetchChunk(chunk) });
+      chunkTasks.push({ symbols: chunk, promise: fetchChunk(chunk, { signal }) });
     }
   }
 
   const failedSymbols = [];
   const staleSymbols = new Set();
+  let rateLimitHit = false;
+  let suggestedRetrySeconds;
 
   if (chunkTasks.length) {
     const settled = await Promise.allSettled(chunkTasks.map((task) => task.promise));
@@ -80,7 +127,17 @@ export const fetchQuotes = async (inputSymbols, { force = false } = {}) => {
         });
       } else {
         failedSymbols.push(...chunkSymbols);
-        console.error(`Error al obtener cotizaciones para ${chunkSymbols.join(', ')}`, result.reason);
+        const reason = result.reason;
+        if (reason instanceof RateLimitError) {
+          rateLimitHit = true;
+          if (Number.isFinite(reason.retryAfter)) {
+            suggestedRetrySeconds = reason.retryAfter;
+          }
+        } else if (reason?.name === 'AbortError') {
+          // ignore, caller cancelled
+        } else {
+          console.error(`Error al obtener cotizaciones para ${chunkSymbols.join(', ')}`, reason);
+        }
         chunkSymbols.forEach((symbol) => {
           const fallback = fallbackBySymbol[symbol];
           if (fallback) {
@@ -97,7 +154,12 @@ export const fetchQuotes = async (inputSymbols, { force = false } = {}) => {
   const uniqueMissing = Array.from(new Set(missingAfter));
 
   let errorMessage = null;
-  if (uniqueFailed.length) {
+  if (rateLimitHit) {
+    const waitMessage = suggestedRetrySeconds
+      ? `Intenta nuevamente en ${suggestedRetrySeconds} segundos.`
+      : 'Intenta nuevamente más tarde.';
+    errorMessage = `Yahoo limitó las consultas. ${waitMessage}`;
+  } else if (uniqueFailed.length) {
     const list = uniqueFailed.join(', ');
     const prefix = `No se pudo actualizar ${uniqueFailed.length === 1 ? 'el símbolo' : 'los símbolos'} ${list}`;
     if (uniqueMissing.length) {
@@ -120,5 +182,4 @@ export const fetchQuotes = async (inputSymbols, { force = false } = {}) => {
 
 export const clearCache = () => {
   cache.clear();
-  inflight.clear();
 };

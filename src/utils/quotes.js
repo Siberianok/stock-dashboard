@@ -40,7 +40,7 @@ export const extractQuoteFields = (quote) => {
     ask,
     avgPrice,
     volToday,
-    volAvg20: volAvg10,
+    volAvg10: volAvg10,
     floatM: typeof floatShares === 'number' ? floatShares / 1e6 : undefined,
     shortPct,
     dtc,
