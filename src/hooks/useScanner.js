@@ -32,16 +32,20 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
       setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
       return;
     }
-    setState((prev) => ({ ...prev, loading: true, error: null }));
+    setState((prev) => ({ ...prev, loading: true, error: null, lastThresholdsKey: scanKey }));
     try {
       const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
       if (!entries.length) {
-        setState({ matches: [], loading: false, error: null, lastUpdated: null });
+        setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
         return;
       }
       const symbolToMarket = Object.fromEntries(entries);
       const symbols = entries.map(([symbol]) => symbol);
       const { quotes, error: quotesError } = await fetchQuotes(symbols, { force: true });
+      const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
+      if (!isLatest) {
+        return;
+      }
       const matches = symbols.map((symbol) => {
         const quote = quotes[symbol];
         if (!quote) return null;
@@ -58,7 +62,7 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         return { data, computed };
       }).filter(Boolean);
       matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
-      setState({ matches, loading: false, error: quotesError || null, lastUpdated: new Date().toISOString() });
+      setState({ matches, loading: false, error: quotesError || null, lastUpdated: new Date().toISOString(), lastThresholdsKey: scanKey });
     } catch (error) {
       console.error(error);
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;

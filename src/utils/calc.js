@@ -51,20 +51,20 @@ export const createCalc = (thresholds) => {
     const emaOK = typeof close === 'number'
       && typeof ema9 === 'number'
       && close > ema9
-      && (!th.needEMA200 || (typeof ema200 === 'number' && close > ema200));
-    const rvol2 = typeof rvol === 'number' && rvol >= th.rvolMin;
-    const rvol5 = typeof rvol === 'number' && rvol >= th.rvolIdeal;
-    const chgOK = typeof chgPct === 'number' && chgPct >= (th.parabolic50 ? 50 : th.chgMin);
-    const atrOK = (typeof atr14 === 'number' && atr14 >= th.atrMin)
-      || (typeof atrPct === 'number' && atrPct >= th.atrPctMin);
-    const float50 = typeof floatM === 'number' && floatM < th.float50;
-    const float10 = typeof floatM === 'number' && floatM < th.float10;
-    const rot1 = typeof rotation === 'number' && rotation >= th.rotationMin;
-    const rot3 = typeof rotation === 'number' && rotation >= th.rotationIdeal;
+      && (!needEMA200 || (typeof ema200 === 'number' && close > ema200));
+    const rvol2 = typeof rvol === 'number' && rvol >= rvolMin;
+    const rvol5 = typeof rvol === 'number' && rvol >= rvolIdeal;
+    const chgOK = typeof chgPct === 'number' && chgPct >= (parabolic50 ? 50 : chgMin);
+    const atrOK = (typeof atr14 === 'number' && atr14 >= atrMin)
+      || (typeof atrPct === 'number' && atrPct >= atrPctMin);
+    const float50 = typeof floatM === 'number' && floatM < float50Limit;
+    const float10 = typeof floatM === 'number' && floatM < float10Limit;
+    const rot1 = typeof rotation === 'number' && rotation >= rotationMin;
+    const rot3 = typeof rotation === 'number' && rotation >= rotationIdeal;
     const hasShortPct = typeof shortPct === 'number';
-    const shortOK = hasShortPct && shortPct >= th.shortMin;
+    const shortOK = hasShortPct && shortPct >= shortMin;
     const shortMissing = !hasShortPct;
-    const spreadOK = typeof spreadPct !== 'number' ? true : spreadPct <= th.spreadMaxPct;
+    const spreadOK = typeof spreadPct !== 'number' ? true : spreadPct <= spreadMaxPct;
     const liqOK = typeof liqM !== 'number' ? true : liqM >= marketLiquidityMin;
 
     let score = 0;
