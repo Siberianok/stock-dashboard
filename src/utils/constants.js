@@ -27,6 +27,15 @@ export const UNIVERSE = {
   AR: [
     'GGAL.BA','PAMP.BA','YPFD.BA','BMA.BA','CEPU.BA','TGSU2.BA','ALUA.BA','TXAR.BA','COME.BA','SUPV.BA',
   ],
+  BR: [
+    'PETR4.SA','VALE3.SA','BBDC4.SA','ITUB4.SA','WEGE3.SA','BBAS3.SA','ABEV3.SA','GOLL4.SA','RAIL3.SA','LREN3.SA',
+  ],
+  EU: [
+    'AIR.PA','MC.PA','OR.PA','ASML.AS','NESN.SW','RMS.PA','SIE.DE','MBG.DE','ADYEN.AS','SAP.DE',
+  ],
+  CN: [
+    'BABA','PDD','JD','LI','NIO','XPEV','TCEHY','BIDU','KWEB','FXI',
+  ],
 };
 
 export const REQUIRED_FLAGS = ['priceOK','emaOK','rvol2','chgOK','atrOK','float50','rot1','shortOK','spreadOK','liqOK'];

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
@@ -26,6 +26,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
           value={row.ticker || ''}
           onChange={(e) => onUpdate(row.id, 'ticker', e.target.value.toUpperCase())}
           placeholder="Ticker"
+          aria-label="Ticker"
         />
       </td>
       <td className="px-3 py-2 w-28">
@@ -33,6 +34,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
           className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-sm"
           value={row.market || 'US'}
           onChange={(e) => onUpdate(row.id, 'market', e.target.value)}
+          aria-label="Mercado"
         >
           {Object.entries(MARKETS).map(([key, info]) => (
             <option key={key} value={key}>{info.label}</option>
@@ -45,7 +47,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.ask)}</td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.avgPrice)}</td>
       <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(row.volToday, 0)}</td>
-      <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(row.volAvg20, 0)}</td>
+      <td className="px-3 py-2 w-24 text-right tabular-nums">{safeNumber(row.volAvg10, 0)}</td>
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safeNumber(rvol)}</td>
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safeNumber(row.floatM)}</td>
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safeNumber(rotation)}</td>
@@ -56,8 +58,22 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safeNumber(row.ema9)}</td>
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safeNumber(row.ema200)}</td>
       <td className="px-3 py-2 w-16 text-right tabular-nums">{safePct(chgPct)}</td>
-      <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!row.catalyst} onChange={(e) => onUpdate(row.id, 'catalyst', e.target.checked)} /></td>
-      <td className="px-3 py-2 text-center"><input type="checkbox" checked={!!row.intradiaOK} onChange={(e) => onUpdate(row.id, 'intradiaOK', e.target.checked)} /></td>
+      <td className="px-3 py-2 text-center">
+        <input
+          type="checkbox"
+          aria-label="Catalizador presente"
+          checked={!!row.catalyst}
+          onChange={(e) => onUpdate(row.id, 'catalyst', e.target.checked)}
+        />
+      </td>
+      <td className="px-3 py-2 text-center">
+        <input
+          type="checkbox"
+          aria-label="Apto intradía"
+          checked={!!row.intradiaOK}
+          onChange={(e) => onUpdate(row.id, 'intradiaOK', e.target.checked)}
+        />
+      </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safePct(row.spreadPct)}</td>
       <td className="px-3 py-2 w-24">
         <div className="flex flex-col items-end gap-1">
@@ -95,6 +111,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
           rows={2}
           className="w-36 border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-xs"
           placeholder="Notas"
+          aria-label="Notas"
         />
       </td>
     </tr>
@@ -117,6 +134,34 @@ export const TickerTable = ({
 }) => {
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(() => rows.map((row) => ({ row, calcResult: calc(row, row.market || 'US') })), [rows, calc]);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+
+  const totalRows = computedRows.length;
+  const maxPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, maxPage));
+  }, [maxPage]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const index = computedRows.findIndex(({ row }) => row.id === selectedId);
+    if (index === -1) return;
+    const targetPage = Math.floor(index / pageSize);
+    setPage((prev) => (prev === targetPage ? prev : targetPage));
+  }, [selectedId, computedRows, pageSize]);
+
+  const currentPage = Math.min(page, maxPage);
+  const pageStart = currentPage * pageSize;
+  const paginatedRows = useMemo(
+    () => computedRows.slice(pageStart, pageStart + pageSize),
+    [computedRows, pageStart, pageSize],
+  );
+
+  const pageCount = Math.max(1, Math.ceil(Math.max(totalRows, 1) / pageSize));
+  const startLabel = totalRows ? pageStart + 1 : 0;
+  const endLabel = totalRows ? Math.min(totalRows, pageStart + pageSize) : 0;
 
   return (
     <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
@@ -145,7 +190,7 @@ export const TickerTable = ({
               <th className="px-3 py-2">Ask</th>
               <th className="px-3 py-2">Promedio</th>
               <th className="px-3 py-2">Vol hoy</th>
-              <th className="px-3 py-2">Vol prom 20</th>
+              <th className="px-3 py-2">Vol prom 10</th>
               <th className="px-3 py-2">RVOL</th>
               <th className="px-3 py-2">Float (M)</th>
               <th className="px-3 py-2">Rotación</th>
@@ -166,7 +211,7 @@ export const TickerTable = ({
             </tr>
           </thead>
           <tbody>
-            {computedRows.map(({ row, calcResult }) => (
+            {paginatedRows.map(({ row, calcResult }) => (
               <TableRow
                 key={row.id}
                 row={row}
@@ -178,6 +223,51 @@ export const TickerTable = ({
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-white/10 text-xs text-white/70">
+        <div>
+          Mostrando {startLabel}-{endLabel} de {totalRows}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1">
+            <span>Filas por página</span>
+            <select
+              className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+              value={pageSize}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setPageSize(next);
+                setPage(0);
+              }}
+              aria-label="Filas por página"
+            >
+              {[10, 25, 50].map((size) => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
+              disabled={currentPage === 0}
+              aria-label="Página anterior"
+            >
+              Anterior
+            </button>
+            <span>Página {pageCount ? currentPage + 1 : 0} / {pageCount}</span>
+            <button
+              type="button"
+              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setPage((prev) => Math.min(prev + 1, maxPage))}
+              disabled={currentPage >= maxPage}
+              aria-label="Página siguiente"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
