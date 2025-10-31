@@ -5,117 +5,56 @@ import {
   applyPresetModerado,
   applyPresetAgresivo,
 } from './thresholdConfig.js';
+import {
+  normalizeThresholds,
+  areThresholdsEqual,
+} from '../utils/thresholds.js';
+import {
+  loadThresholdState,
+  persistThresholdState,
+  createSnapshot,
+  MAX_THRESHOLD_HISTORY,
+} from '../services/storage/thresholdStorage.js';
 
-const STORAGE_KEY = 'selector.thresholds.v1';
-const isBrowser = typeof window !== 'undefined';
-
-const sanitizeNumber = (value, { min = -Infinity, max = Infinity } = {}) => {
-  if (!Number.isFinite(value)) return undefined;
-  const clamped = Math.min(Math.max(value, min), max);
-  return clamped;
-};
-
-const sanitizeThresholds = (raw) => {
-  const next = {
-    ...DEFAULT_THRESHOLDS,
-    marketsEnabled: { ...DEFAULT_THRESHOLDS.marketsEnabled },
-    priceRange: { ...DEFAULT_THRESHOLDS.priceRange },
-    liquidityMin: { ...DEFAULT_THRESHOLDS.liquidityMin },
-  };
-
-  if (!raw || typeof raw !== 'object') {
-    return next;
-  }
-
-  if (raw.marketsEnabled && typeof raw.marketsEnabled === 'object') {
-    Object.entries(raw.marketsEnabled).forEach(([market, enabled]) => {
-      next.marketsEnabled[market] = Boolean(enabled);
-    });
-  }
-
-  if (raw.priceRange && typeof raw.priceRange === 'object') {
-    Object.entries(raw.priceRange).forEach(([market, value]) => {
-      if (!value || typeof value !== 'object') return;
-      const min = sanitizeNumber(value.min, { min: 0 });
-      const max = sanitizeNumber(value.max, { min: 0 });
-      next.priceRange[market] = {
-        ...(next.priceRange[market] || {}),
-        ...(min !== undefined ? { min } : {}),
-        ...(max !== undefined ? { max } : {}),
-      };
-    });
-  }
-
-  if (raw.liquidityMin && typeof raw.liquidityMin === 'object') {
-    Object.entries(raw.liquidityMin).forEach(([market, value]) => {
-      const sanitized = sanitizeNumber(value, { min: 0 });
-      if (sanitized === undefined) return;
-      next.liquidityMin[market] = sanitized;
-    });
-  }
-
-  const numericKeys = [
-    'rvolMin',
-    'rvolIdeal',
-    'atrMin',
-    'atrPctMin',
-    'chgMin',
-    'float50',
-    'float10',
-    'rotationMin',
-    'rotationIdeal',
-    'shortMin',
-    'spreadMaxPct',
-  ];
-
-  numericKeys.forEach((key) => {
-    const sanitized = sanitizeNumber(raw[key], { min: 0 });
-    if (sanitized !== undefined) {
-      next[key] = sanitized;
-    }
-  });
-
-  if (typeof raw.parabolic50 === 'boolean') {
-    next.parabolic50 = raw.parabolic50;
-  }
-  if (typeof raw.needEMA200 === 'boolean') {
-    next.needEMA200 = raw.needEMA200;
-  }
-
-  return next;
-};
-
-const loadStoredThresholds = () => {
-  if (!isBrowser) {
-    return DEFAULT_THRESHOLDS;
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_THRESHOLDS;
-    }
-    const parsed = JSON.parse(raw);
-    return sanitizeThresholds(parsed);
-  } catch (error) {
-    logError('thresholds.storage.load', error);
-    return DEFAULT_THRESHOLDS;
-  }
-};
+const cloneState = (state) => ({
+  thresholds: normalizeThresholds(state.thresholds ?? DEFAULT_THRESHOLDS),
+  history: Array.isArray(state.history) ? [...state.history] : [],
+});
 
 export function useThresholds() {
-  const [thresholds, setThresholds] = useState(loadStoredThresholds);
+  const [state, setState] = useState(() => cloneState(loadThresholdState()));
 
   useEffect(() => {
-    if (!isBrowser) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(thresholds));
-    } catch (error) {
-      logError('thresholds.storage.save', error);
-    }
-  }, [thresholds]);
+    persistThresholdState(state);
+  }, [state]);
+
+  const commit = useCallback((updater, { snapshot = true, label } = {}) => {
+    setState((prevState) => {
+      const previous = prevState.thresholds;
+      const nextValue = typeof updater === 'function' ? updater(previous) : updater;
+      const normalized = normalizeThresholds(nextValue);
+
+      if (areThresholdsEqual(previous, normalized)) {
+        return prevState;
+      }
+
+      const nextHistory = snapshot
+        ? [...prevState.history, createSnapshot(previous, { label })].slice(-MAX_THRESHOLD_HISTORY)
+        : prevState.history;
+
+      return {
+        thresholds: normalized,
+        history: nextHistory,
+      };
+    });
+  }, []);
+
+  const setThresholds = useCallback((value) => {
+    commit(value);
+  }, [commit]);
 
   const updatePriceRange = useCallback((market, field, value) => {
-    setThresholds((prev) => {
+    commit((prev) => {
       const prevMarket = prev.priceRange?.[market] || {};
       if (value === undefined) {
         if (!(field in prevMarket)) return prev;
@@ -137,10 +76,10 @@ export function useThresholds() {
         },
       };
     });
-  }, []);
+  }, [commit]);
 
   const updateLiquidityMin = useCallback((market, value) => {
-    setThresholds((prev) => {
+    commit((prev) => {
       const prevLiquidity = prev.liquidityMin || {};
       if (value === undefined) {
         if (!(market in prevLiquidity)) return prev;
@@ -159,50 +98,83 @@ export function useThresholds() {
         },
       };
     });
-  }, []);
+  }, [commit]);
 
   const toggleMarket = useCallback((market, enabled) => {
-    setThresholds((prev) => ({
+    commit((prev) => ({
       ...prev,
       marketsEnabled: {
         ...prev.marketsEnabled,
         [market]: enabled,
       },
     }));
-  }, []);
+  }, [commit]);
 
   const presetModerado = useCallback(() => {
-    setThresholds((prev) => applyPresetModerado(prev));
-  }, []);
+    commit((prev) => applyPresetModerado(prev), { label: 'Preset moderado' });
+  }, [commit]);
 
   const presetAgresivo = useCallback(() => {
-    setThresholds((prev) => applyPresetAgresivo(prev));
+    commit((prev) => applyPresetAgresivo(prev), { label: 'Preset agresivo' });
+  }, [commit]);
+
+  const undo = useCallback(() => {
+    setState((prevState) => {
+      if (!prevState.history.length) {
+        return prevState;
+      }
+      const nextHistory = prevState.history.slice(0, -1);
+      const lastSnapshot = prevState.history[prevState.history.length - 1];
+      const restored = normalizeThresholds(lastSnapshot.thresholds);
+      if (areThresholdsEqual(prevState.thresholds, restored)) {
+        return {
+          thresholds: restored,
+          history: nextHistory,
+        };
+      }
+      return {
+        thresholds: restored,
+        history: nextHistory,
+      };
+    });
+  }, []);
+
+  const pushSnapshot = useCallback((label) => {
+    setState((prevState) => {
+      const nextHistory = [...prevState.history, createSnapshot(prevState.thresholds, { label })]
+        .slice(-MAX_THRESHOLD_HISTORY);
+      return {
+        thresholds: prevState.thresholds,
+        history: nextHistory,
+      };
+    });
   }, []);
 
   const thresholdsKey = useMemo(
     () => JSON.stringify({
-      marketsEnabled: thresholds.marketsEnabled,
-      priceRange: thresholds.priceRange,
-      liquidityMin: thresholds.liquidityMin,
-      rvolMin: thresholds.rvolMin,
-      rvolIdeal: thresholds.rvolIdeal,
-      atrMin: thresholds.atrMin,
-      atrPctMin: thresholds.atrPctMin,
-      chgMin: thresholds.chgMin,
-      parabolic50: thresholds.parabolic50,
-      needEMA200: thresholds.needEMA200,
-      float50: thresholds.float50,
-      float10: thresholds.float10,
-      rotationMin: thresholds.rotationMin,
-      rotationIdeal: thresholds.rotationIdeal,
-      shortMin: thresholds.shortMin,
-      spreadMaxPct: thresholds.spreadMaxPct,
+      marketsEnabled: state.thresholds.marketsEnabled,
+      priceRange: state.thresholds.priceRange,
+      liquidityMin: state.thresholds.liquidityMin,
+      rvolMin: state.thresholds.rvolMin,
+      rvolIdeal: state.thresholds.rvolIdeal,
+      atrMin: state.thresholds.atrMin,
+      atrPctMin: state.thresholds.atrPctMin,
+      chgMin: state.thresholds.chgMin,
+      parabolic50: state.thresholds.parabolic50,
+      needEMA200: state.thresholds.needEMA200,
+      float50: state.thresholds.float50,
+      float10: state.thresholds.float10,
+      rotationMin: state.thresholds.rotationMin,
+      rotationIdeal: state.thresholds.rotationIdeal,
+      shortMin: state.thresholds.shortMin,
+      spreadMaxPct: state.thresholds.spreadMaxPct,
     }),
-    [thresholds],
+    [state.thresholds],
   );
 
   return {
-    thresholds,
+    thresholds: state.thresholds,
+    history: state.history,
     setThresholds,
     thresholdsKey,
     updatePriceRange,
@@ -210,5 +182,7 @@ export function useThresholds() {
     toggleMarket,
     presetModerado,
     presetAgresivo,
+    undo,
+    pushSnapshot,
   };
 }
