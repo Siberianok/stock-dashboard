@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
+import { logError } from '../utils/logger.js';
 import {
   DEFAULT_THRESHOLDS,
   applyPresetModerado,

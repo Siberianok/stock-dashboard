@@ -2,7 +2,7 @@ import { generateMockQuotes as defaultGenerateMockQuotes } from './mockQuotes.js
 
 const CACHE_TTL = 30_000;
 const MAX_SYMBOLS_PER_REQUEST = 50;
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 4;
 const BASE_BACKOFF_MS = 400;
 const RATE_LIMIT_STATUS = 429;
 const MAX_CONCURRENT_CHUNKS = 2;
@@ -82,27 +82,49 @@ class RateLimitError extends Error {
   }
 }
 
-const fetchChunk = async (symbols, { signal } = {}) => {
-  const controller = new AbortController();
-  const { signal: requestSignal } = controller;
+const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
-  let abortListener;
-  if (signal) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-    } else {
-      abortListener = () => controller.abort(signal.reason);
-      signal.addEventListener('abort', abortListener, { once: true });
-    }
+const getBackoffDelay = (attempt) => {
+  const base = BASE_BACKOFF_MS * 2 ** attempt;
+  const jitter = base * JITTER_FACTOR * Math.random();
+  return base + jitter;
+};
+
+const registerFailure = () => {
+  circuitState.failures += 1;
+  if (circuitState.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitState.openUntil = Date.now() + CIRCUIT_BREAKER_TIMEOUT_MS;
   }
+};
 
-  try {
-    const sortedSymbols = symbols.slice().sort();
-    const joined = encodeURIComponent(sortedSymbols.join(','));
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${joined}`;
+const registerSuccess = () => {
+  circuitState.failures = 0;
+  circuitState.openUntil = 0;
+};
 
-    let attempt = 0;
-    for (;;) {
+const isCircuitOpen = () => circuitState.openUntil && Date.now() < circuitState.openUntil;
+
+const circuitRemainingMs = () => Math.max(0, circuitState.openUntil - Date.now());
+
+const fetchChunk = async (symbols, { signal } = {}) => {
+  const sortedSymbols = symbols.slice().sort();
+  const joined = encodeURIComponent(sortedSymbols.join(','));
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${joined}`;
+
+  let attempt = 0;
+  const startedAt = nowMs();
+  for (;;) {
+    try {
+      const response = await fetch(url, { signal });
+      if (response.status === RATE_LIMIT_STATUS) {
+        const retryAfterHeader = response.headers?.get?.('Retry-After');
+        const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined;
+        throw new RateLimitError(Number.isFinite(retryAfter) ? retryAfter : undefined);
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      let json;
       try {
         const response = await fetch(url, { signal: requestSignal });
         if (response.status === RATE_LIMIT_STATUS) {
@@ -117,23 +139,31 @@ const fetchChunk = async (symbols, { signal } = {}) => {
         const result = json?.quoteResponse?.result || [];
         return result;
       } catch (error) {
-        if (error.name === 'AbortError') {
-          throw error;
-        }
-        if (error instanceof RateLimitError) {
-          throw error;
-        }
-        if (attempt >= MAX_RETRIES) {
-          throw error;
-        }
-        const wait = BASE_BACKOFF_MS * 2 ** attempt;
-        attempt += 1;
-        await delay(wait);
+        throw new Error('Respuesta inválida de Yahoo Finance');
       }
-    }
-  } finally {
-    if (signal && abortListener) {
-      signal.removeEventListener('abort', abortListener);
+      const serialized = JSON.stringify(json || {});
+      const payloadSize = serialized.length;
+      const result = json?.quoteResponse?.result || [];
+      const duration = Math.max(0, nowMs() - startedAt);
+      result.forEach((quote) => {
+        if (quote?.symbol) {
+          cache.set(quote.symbol.toUpperCase(), { timestamp: Date.now(), data: quote });
+        }
+      });
+      return { quotes: result, metrics: { duration, payloadSize, attempts: attempt + 1 } };
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw error;
+      }
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
+      if (attempt >= MAX_RETRIES) {
+        throw error;
+      }
+      const wait = getBackoffDelay(attempt);
+      attempt += 1;
+      await delay(wait);
     }
   }
 };
@@ -166,12 +196,16 @@ export const fetchQuotes = async (
       freshQuotes[symbol] = cached.data;
       processedSymbols.add(symbol);
     } else {
-      if (cached?.data) {
-        fallbackBySymbol[symbol] = cached.data;
+      for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
+        const chunk = missing.slice(i, i + MAX_SYMBOLS_PER_REQUEST);
+        if (chunk.length) {
+          chunkTasks.push({
+            symbols: chunk,
+            promise: fetchChunk(chunk, { signal: sharedContext.signal }),
+          });
+        }
       }
-      missing.push(symbol);
     }
-  });
 
   const chunkTasks = [];
   for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
@@ -271,10 +305,30 @@ export const fetchQuotes = async (
             freshQuotes[symbol] = { ...fallback };
             staleSymbols.add(symbol);
           }
-        });
-      }
-    });
-  }
+          chunkSymbols.forEach((symbol) => {
+            const fallback = fallbackBySymbol[symbol];
+            if (fallback) {
+              freshQuotes[symbol] = { ...fallback };
+              staleSymbols.add(symbol);
+              fallbackHits += 1;
+            }
+          });
+        }
+      });
+    } else if (circuitTriggered) {
+      missing.forEach((symbol) => {
+        const fallback = fallbackBySymbol[symbol];
+        if (fallback) {
+          freshQuotes[symbol] = { ...fallback };
+          staleSymbols.add(symbol);
+          fallbackHits += 1;
+        }
+      });
+    }
+
+    const missingAfter = symbols.filter((symbol) => !freshQuotes[symbol]);
+    const uniqueFailed = Array.from(new Set(failedSymbols));
+    const uniqueMissing = Array.from(new Set(missingAfter));
 
   const missingAfter = symbols.filter((symbol) => !freshQuotes[symbol]);
   const uniqueFailed = Array.from(new Set(failedSymbols));
@@ -300,14 +354,10 @@ export const fetchQuotes = async (
     const prefix = `No se pudo actualizar ${uniqueFailed.length === 1 ? 'el símbolo' : 'los símbolos'} ${list}`;
     if (uniqueMissing.length) {
       const missingList = uniqueMissing.join(', ');
-      errorMessage = `${prefix}. Sin datos actuales para ${missingList}.`;
-    } else {
-      errorMessage = `${prefix}. Se mantienen los datos en caché disponibles.`;
+      errorMessage = `No se encontraron datos para ${missingList}.`;
+    } else if (!errorMessage && !circuitTriggered) {
+      registerSuccess();
     }
-  } else if (uniqueMissing.length) {
-    const missingList = uniqueMissing.join(', ');
-    errorMessage = `No se encontraron datos para ${missingList}.`;
-  }
 
   if (!errorMessage && uniqueInvalid.length) {
     errorMessage = `Datos incompletos para ${uniqueInvalid.join(', ')}. Se mantienen datos previos si están disponibles.`;

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchQuotes } from '../services/yahooFinance.js';
 import { REQUIRED_FLAGS, UNIVERSE } from '../utils/constants.js';
 import { extractQuoteFields } from '../utils/quotes.js';
+import { logError } from '../utils/logger.js';
+
+const isBrowser = typeof window !== 'undefined';
 
 export const scanUniverse = async ({ enabledMarkets, calc, fetcher, coverageThreshold = 0.8 }) => {
   const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
@@ -116,6 +119,7 @@ export const useScanner = ({ thresholds, calc, thresholdsKey, mode = 'live', cov
       });
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
       if (!isLatest) {
+        controller.abort();
         return;
       }
       const matches = symbols.map((symbol) => {
@@ -153,9 +157,10 @@ export const useScanner = ({ thresholds, calc, thresholdsKey, mode = 'live', cov
         coverage: normalizedCoverage,
       });
     } catch (error) {
-      console.error(error);
+      logError('scanner.fetch', error);
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
       if (!isLatest) {
+        controller.abort();
         return;
       }
       setState((prev) => ({
@@ -177,6 +182,7 @@ export const useScanner = ({ thresholds, calc, thresholdsKey, mode = 'live', cov
   }, [runScan, thresholdsKey, mode]);
 
   useEffect(() => {
+    if (!isBrowser) return () => {};
     const interval = window.setInterval(runScan, 60_000);
     return () => window.clearInterval(interval);
   }, [runScan]);
