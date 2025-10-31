@@ -8,8 +8,16 @@ const RATE_LIMIT_STATUS = 429;
 const MAX_CONCURRENT_CHUNKS = 2;
 const DEFAULT_MARKET_KEY = 'DEFAULT';
 const COVERAGE_ALERT_THRESHOLD = 0.8;
+const JITTER_FACTOR = 0.3;
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_TIMEOUT_MS = 60_000;
 
 const cache = new Map(); // `${market}::${symbol}` -> { timestamp, data }
+
+const circuitState = {
+  failures: 0,
+  openUntil: 0,
+};
 
 const getCacheKey = (symbol, market = DEFAULT_MARKET_KEY) => `${market}::${symbol}`;
 
@@ -46,17 +54,17 @@ const sanitizeQuote = (quote) => {
   return { valid: true, quote: sanitized };
 };
 
-const processQueue = async (chunks, handler, { concurrency = 1 } = {}) => {
-  if (!chunks.length) {
+const processQueue = async (items, handler, { concurrency = 1 } = {}) => {
+  if (!items.length) {
     return [];
   }
-  const settled = new Array(chunks.length);
+  const settled = new Array(items.length);
   let index = 0;
   const runWorker = async () => {
-    while (index < chunks.length) {
+    while (index < items.length) {
       const currentIndex = index;
       index += 1;
-      const item = chunks[currentIndex];
+      const item = items[currentIndex];
       try {
         const value = await handler(item, currentIndex);
         settled[currentIndex] = { status: 'fulfilled', value };
@@ -65,7 +73,7 @@ const processQueue = async (chunks, handler, { concurrency = 1 } = {}) => {
       }
     }
   };
-  const workers = Array.from({ length: Math.min(concurrency, chunks.length) }, () => runWorker());
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker());
   await Promise.all(workers);
   return settled;
 };
@@ -124,32 +132,14 @@ const fetchChunk = async (symbols, { signal } = {}) => {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      let json;
-      try {
-        const response = await fetch(url, { signal: requestSignal });
-        if (response.status === RATE_LIMIT_STATUS) {
-          const retryAfterHeader = response.headers?.get('Retry-After');
-          const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined;
-          throw new RateLimitError(Number.isFinite(retryAfter) ? retryAfter : undefined);
-        }
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const json = await response.json();
-        const result = json?.quoteResponse?.result || [];
-        return result;
-      } catch (error) {
+      const json = await response.json();
+      const result = json?.quoteResponse?.result;
+      if (!Array.isArray(result)) {
         throw new Error('Respuesta inválida de Yahoo Finance');
       }
       const serialized = JSON.stringify(json || {});
       const payloadSize = serialized.length;
-      const result = json?.quoteResponse?.result || [];
       const duration = Math.max(0, nowMs() - startedAt);
-      result.forEach((quote) => {
-        if (quote?.symbol) {
-          cache.set(quote.symbol.toUpperCase(), { timestamp: Date.now(), data: quote });
-        }
-      });
       return { quotes: result, metrics: { duration, payloadSize, attempts: attempt + 1 } };
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -188,38 +178,41 @@ export const fetchQuotes = async (
   const missing = [];
   const fallbackBySymbol = {};
   const processedSymbols = new Set();
+
   symbols.forEach((symbol) => {
     const market = resolveMarket(symbol, marketBySymbol);
     const cacheKey = getCacheKey(symbol, market);
     const cached = cache.get(cacheKey);
+    if (cached) {
+      fallbackBySymbol[symbol] = cached.data;
+    }
     if (!force && cached && now - cached.timestamp <= CACHE_TTL) {
       freshQuotes[symbol] = cached.data;
       processedSymbols.add(symbol);
     } else {
-      for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
-        const chunk = missing.slice(i, i + MAX_SYMBOLS_PER_REQUEST);
-        if (chunk.length) {
-          chunkTasks.push({
-            symbols: chunk,
-            promise: fetchChunk(chunk, { signal: sharedContext.signal }),
-          });
-        }
-      }
+      missing.push(symbol);
     }
+  });
 
-  const chunkTasks = [];
-  for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
-    const chunk = missing.slice(i, i + MAX_SYMBOLS_PER_REQUEST);
-    if (chunk.length) {
-      chunkTasks.push(chunk);
-    }
-  }
-
-  const failedSymbols = [];
   const staleSymbols = new Set();
   const invalidSymbols = new Set();
+  const failedSymbols = [];
   let rateLimitHit = false;
   let suggestedRetrySeconds;
+  let circuitTriggered = false;
+
+  if (missing.length && isCircuitOpen()) {
+    circuitTriggered = true;
+  }
+
+  const handleFallback = (symbol) => {
+    const fallback = fallbackBySymbol[symbol];
+    if (fallback) {
+      freshQuotes[symbol] = { ...fallback };
+      processedSymbols.add(symbol);
+      staleSymbols.add(symbol);
+    }
+  };
 
   if (mode === 'mock' && missing.length) {
     const generator = typeof generateMockQuotes === 'function' ? generateMockQuotes : defaultGenerateMockQuotes;
@@ -232,21 +225,13 @@ export const fetchQuotes = async (
         const quote = mocked?.[symbol];
         if (!quote) {
           invalidSymbols.add(symbol);
-          const fallback = fallbackBySymbol[symbol];
-          if (fallback) {
-            freshQuotes[symbol] = { ...fallback };
-            staleSymbols.add(symbol);
-          }
+          handleFallback(symbol);
           return;
         }
         const { valid, quote: sanitized } = sanitizeQuote({ ...quote, symbol });
         if (!valid) {
           invalidSymbols.add(symbol);
-          const fallback = fallbackBySymbol[symbol];
-          if (fallback) {
-            freshQuotes[symbol] = { ...fallback };
-            staleSymbols.add(symbol);
-          }
+          handleFallback(symbol);
           return;
         }
         const market = resolveMarket(symbol, marketBySymbol);
@@ -255,29 +240,40 @@ export const fetchQuotes = async (
         freshQuotes[symbol] = sanitized;
         processedSymbols.add(symbol);
       });
+      registerSuccess();
     }
-  } else if (chunkTasks.length) {
+  } else if (missing.length && !circuitTriggered) {
+    const chunkTasks = [];
+    for (let i = 0; i < missing.length; i += MAX_SYMBOLS_PER_REQUEST) {
+      const chunk = missing.slice(i, i + MAX_SYMBOLS_PER_REQUEST);
+      if (chunk.length) {
+        chunkTasks.push(chunk);
+      }
+    }
     const settled = await processQueue(
       chunkTasks,
       (chunk) => fetchChunk(chunk, { signal }),
       { concurrency: MAX_CONCURRENT_CHUNKS },
     );
+
+    let anySuccess = false;
+
     settled.forEach((result, index) => {
       const chunkSymbols = chunkTasks[index];
       if (result?.status === 'fulfilled') {
-        result.value.forEach((rawQuote) => {
-          const { valid, quote } = sanitizeQuote(rawQuote);
-          const symbol = rawQuote?.symbol?.toUpperCase?.();
+        anySuccess = true;
+        const found = new Set();
+        const { quotes: rawQuotes } = result.value;
+        rawQuotes.forEach((rawQuote) => {
+          const symbol = normalizeSymbol(rawQuote?.symbol);
           if (!symbol) {
             return;
           }
+          found.add(symbol);
+          const { valid, quote } = sanitizeQuote(rawQuote);
           if (!valid) {
             invalidSymbols.add(symbol);
-            const fallback = fallbackBySymbol[symbol];
-            if (fallback) {
-              freshQuotes[symbol] = { ...fallback };
-              staleSymbols.add(symbol);
-            }
+            handleFallback(symbol);
             return;
           }
           const market = resolveMarket(symbol, marketBySymbol);
@@ -286,49 +282,41 @@ export const fetchQuotes = async (
           freshQuotes[symbol] = quote;
           processedSymbols.add(symbol);
         });
+        chunkSymbols.forEach((symbol) => {
+          if (!found.has(symbol)) {
+            failedSymbols.push(symbol);
+            handleFallback(symbol);
+          }
+        });
       } else {
         failedSymbols.push(...chunkSymbols);
         const reason = result?.reason;
         if (reason instanceof RateLimitError) {
           rateLimitHit = true;
-          if (Number.isFinite(reason.retryAfter)) {
-            suggestedRetrySeconds = reason.retryAfter;
-          }
+          suggestedRetrySeconds = reason.retryAfter;
+          registerFailure();
         } else if (reason?.name === 'AbortError') {
-          // ignore, caller cancelled
-        } else if (reason) {
-          console.error(`Error al obtener cotizaciones para ${chunkSymbols.join(', ')}`, reason);
+          // caller cancelled
+        } else {
+          registerFailure();
+          if (reason) {
+            console.error(`Error al obtener cotizaciones para ${chunkSymbols.join(', ')}`, reason);
+          }
         }
         chunkSymbols.forEach((symbol) => {
-          const fallback = fallbackBySymbol[symbol];
-          if (fallback) {
-            freshQuotes[symbol] = { ...fallback };
-            staleSymbols.add(symbol);
-          }
-          chunkSymbols.forEach((symbol) => {
-            const fallback = fallbackBySymbol[symbol];
-            if (fallback) {
-              freshQuotes[symbol] = { ...fallback };
-              staleSymbols.add(symbol);
-              fallbackHits += 1;
-            }
-          });
-        }
-      });
-    } else if (circuitTriggered) {
-      missing.forEach((symbol) => {
-        const fallback = fallbackBySymbol[symbol];
-        if (fallback) {
-          freshQuotes[symbol] = { ...fallback };
-          staleSymbols.add(symbol);
-          fallbackHits += 1;
-        }
-      });
-    }
+          handleFallback(symbol);
+        });
+      }
+    });
 
-    const missingAfter = symbols.filter((symbol) => !freshQuotes[symbol]);
-    const uniqueFailed = Array.from(new Set(failedSymbols));
-    const uniqueMissing = Array.from(new Set(missingAfter));
+    if (anySuccess) {
+      registerSuccess();
+    }
+  } else if (missing.length && circuitTriggered) {
+    missing.forEach((symbol) => {
+      handleFallback(symbol);
+    });
+  }
 
   const missingAfter = symbols.filter((symbol) => !freshQuotes[symbol]);
   const uniqueFailed = Array.from(new Set(failedSymbols));
@@ -349,20 +337,23 @@ export const fetchQuotes = async (
       ? `Intenta nuevamente en ${suggestedRetrySeconds} segundos.`
       : 'Intenta nuevamente más tarde.';
     errorMessage = `Yahoo limitó las consultas. ${waitMessage}`;
-  } else if (uniqueFailed.length) {
+  } else if (uniqueFailed.length && !uniqueInvalid.length) {
     const list = uniqueFailed.join(', ');
-    const prefix = `No se pudo actualizar ${uniqueFailed.length === 1 ? 'el símbolo' : 'los símbolos'} ${list}`;
-    if (uniqueMissing.length) {
-      const missingList = uniqueMissing.join(', ');
-      errorMessage = `No se encontraron datos para ${missingList}.`;
-    } else if (!errorMessage && !circuitTriggered) {
-      registerSuccess();
-    }
+    errorMessage = `No se pudo actualizar ${uniqueFailed.length === 1 ? 'el símbolo' : 'los símbolos'} ${list}.`;
+  }
 
   if (!errorMessage && uniqueInvalid.length) {
     errorMessage = `Datos incompletos para ${uniqueInvalid.join(', ')}. Se mantienen datos previos si están disponibles.`;
   } else if (!errorMessage && coverage.alert) {
     errorMessage = 'Cobertura baja en la actualización. Algunos tickers no pudieron refrescarse.';
+  }
+
+  if (circuitTriggered && !rateLimitHit) {
+    registerFailure();
+    if (!errorMessage) {
+      const wait = Math.ceil(circuitRemainingMs() / 1000);
+      errorMessage = `Servicio temporalmente limitado. Intentaremos nuevamente en ${wait} segundos.`;
+    }
   }
 
   return {
@@ -376,4 +367,6 @@ export const fetchQuotes = async (
 
 export const clearCache = () => {
   cache.clear();
+  circuitState.failures = 0;
+  circuitState.openUntil = 0;
 };
