@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef, memo, forwardRef } from 'react';
 import {
   ResponsiveContainer,
   Tooltip,
@@ -20,6 +20,9 @@ import { createCalc } from './utils/calc.js';
 import { fetchQuotes, clearCache } from './services/yahooFinance.js';
 import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
+import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
+import { useTheme } from './hooks/useTheme.js';
+import { useChartExport } from './hooks/useChartExport.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
 import { Badge } from './components/Badge.jsx';
@@ -33,6 +36,202 @@ const Stat = ({ label, value, sub, icon }) => (
       {sub ? <div className="text-xs text-white/60 mt-1">{sub}</div> : null}
     </div>
   </div>
+);
+
+const TIME_RANGE_OPTIONS = [
+  { key: '1D', label: '24h' },
+  { key: '5D', label: '5 días' },
+  { key: '1M', label: '1 mes' },
+  { key: '3M', label: '3 meses' },
+  { key: 'ALL', label: 'Todo' },
+];
+
+const TIME_RANGE_LABELS = {
+  '1D': 'últimas 24h',
+  '5D': 'últimos 5 días',
+  '1M': 'último mes',
+  '3M': 'últimos 3 meses',
+  ALL: 'todo el historial',
+};
+
+const TooltipCard = ({ title, subtitle, children }) => (
+  <div className={`rounded-xl ${COLORS.glass} p-3 text-xs space-y-1 min-w-[160px]`}>
+    {title ? <div className="font-semibold text-white">{title}</div> : null}
+    {subtitle ? <div className="text-[11px] text-white/60">{subtitle}</div> : null}
+    <div className="space-y-1 text-white/80">{children}</div>
+  </div>
+);
+
+const ScoreDistributionTooltip = ({ active, payload, total, timeRange }) => {
+  if (!active || !payload?.length) return null;
+  const item = payload[0]?.payload;
+  if (!item) return null;
+  const share = total ? Math.round(((item.value || 0) / total) * 1000) / 10 : 0;
+  return (
+    <TooltipCard title={item.name} subtitle={TIME_RANGE_LABELS[timeRange] || ''}>
+      <div className="flex items-center justify-between">
+        <span>Tickers</span>
+        <span className="font-semibold text-white">{item.value}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span>Participación</span>
+        <span className="font-semibold text-white">{share.toFixed(1)}%</span>
+      </div>
+    </TooltipCard>
+  );
+};
+
+const SankeyTooltip = ({ active, payload, timeRange }) => {
+  if (!active || !payload?.length) return null;
+  const item = payload[0];
+  const link = item?.payload;
+  if (!link) return null;
+  const source = link.source?.name || '';
+  const target = link.target?.name || '';
+  return (
+    <TooltipCard title={`${source} → ${target}`} subtitle={TIME_RANGE_LABELS[timeRange] || ''}>
+      <div className="flex items-center justify-between">
+        <span>Tickers</span>
+        <span className="font-semibold text-white">{item.value}</span>
+      </div>
+    </TooltipCard>
+  );
+};
+
+const ScoreDistributionCard = memo(
+  forwardRef(function ScoreDistributionCard(
+    { data, total, averageScore, timeRange, onExport, theme },
+    ref,
+  ) {
+    return (
+      <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-base">Distribución de SCORE</h3>
+            <p className="text-xs text-white/60">Promedio ponderado: {fmt(averageScore, 1)} · {TIME_RANGE_LABELS[timeRange]}</p>
+          </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+            onClick={() => onExport(ref?.current, {
+              filename: 'score-distribution.png',
+              backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
+            })}
+          >
+            Exportar
+          </button>
+        </div>
+        <ResponsiveContainer height={220}>
+          <PieChart>
+            <Tooltip
+              content={<ScoreDistributionTooltip total={total} timeRange={timeRange} />}
+              wrapperStyle={{ outline: 'none' }}
+            />
+            <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2}>
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="mt-3 text-xs text-white/70 text-center">Tickers promedio activos: {Math.round(total || 0)}</div>
+      </div>
+    );
+  }),
+);
+
+const FlowSankeyCard = memo(
+  forwardRef(function FlowSankeyCard({ data, onExport, theme, timeRange, accentColor }, ref) {
+    const nodeStroke = theme === 'dark' ? '#1e293b' : '#cbd5f5';
+    return (
+      <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-base">Embudo de confirmaciones</h3>
+            <p className="text-xs text-white/60">Pasos promedio · {TIME_RANGE_LABELS[timeRange]}</p>
+          </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+            onClick={() => onExport(ref?.current, {
+              filename: 'flujo-confirmaciones.png',
+              backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
+            })}
+          >
+            Exportar
+          </button>
+        </div>
+        <ResponsiveContainer height={220}>
+          <Sankey
+            data={data}
+            nodePadding={24}
+            nodeWidth={18}
+            margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
+            link={{ stroke: accentColor, strokeWidth: 1.2 }}
+            node={{ stroke: nodeStroke, fill: accentColor }}
+          >
+            <Tooltip content={<SankeyTooltip timeRange={timeRange} />} wrapperStyle={{ outline: 'none' }} />
+          </Sankey>
+        </ResponsiveContainer>
+      </div>
+    );
+  }),
+);
+
+const RadarTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const item = payload[0]?.payload;
+  if (!item) return null;
+  return (
+    <TooltipCard title={item.k}>
+      <div className="flex items-center justify-between">
+        <span>Puntaje</span>
+        <span className="font-semibold text-white">{fmt(item.v, 0)}%</span>
+      </div>
+      {item.raw !== undefined ? (
+        <div className="flex items-center justify-between">
+          <span>Valor</span>
+          <span className="font-semibold text-white">{fmt(item.raw, 2)}</span>
+        </div>
+      ) : null}
+    </TooltipCard>
+  );
+};
+
+const PerformanceRadarCard = memo(
+  forwardRef(function PerformanceRadarCard({ data, selectedRow, onExport, theme, accentColor }, ref) {
+    const label = selectedRow?.ticker ? `${selectedRow.ticker} · ${selectedRow.market || ''}` : 'Sin selección';
+    return (
+      <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-base">Perfil del ticker</h3>
+            <p className="text-xs text-white/60">{label}</p>
+          </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+            onClick={() => onExport(ref?.current, {
+              filename: 'perfil-ticker.png',
+              backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
+            })}
+          >
+            Exportar
+          </button>
+        </div>
+        <ResponsiveContainer height={220}>
+          <RadarChart data={data} outerRadius={80}>
+            <PolarGrid />
+            <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
+            <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
+            <Radar dataKey="v" stroke={accentColor} fill={accentColor} fillOpacity={0.3} />
+            <Tooltip content={<RadarTooltip />} wrapperStyle={{ outline: 'none' }} />
+          </RadarChart>
+        </ResponsiveContainer>
+        <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para actualizar el radar.</div>
+      </div>
+    );
+  }),
 );
 
 const parseNumberInput = (input) => {
@@ -384,53 +583,31 @@ function App() {
     [rows, thresholds.marketsEnabled],
   );
 
-  const kpis = useMemo(() => {
-    const scores = activeComputed.map((entry) => entry.computed?.score || 0);
-    const top = scores.length ? Math.max(...scores) : 0;
-    const inPlay = activeComputed.filter((entry) => {
-      const flags = entry.computed?.flags || {};
-      return flags.rvol2 && flags.priceOK && flags.emaOK;
-    }).length;
-    const ready70 = activeComputed.filter((entry) => (entry.computed?.score || 0) >= 70).length;
-    return { top, inPlay, ready70, total: activeComputed.length, totalAll: rows.length };
-  }, [activeComputed, rows.length]);
+  const { theme, toggleTheme, palette } = useTheme();
+  const exportChart = useChartExport();
 
-  const scoreBuckets = useMemo(() => {
-    const hi = activeComputed.filter((entry) => (entry.computed?.score || 0) >= 70).length;
-    const mid = activeComputed.filter((entry) => {
-      const score = entry.computed?.score || 0;
-      return score >= 40 && score < 70;
-    }).length;
-    const lo = Math.max(0, (activeComputed.length || 0) - hi - mid);
-    return [
-      { name: '>=70', value: hi, color: COLORS.scoreHi },
-      { name: '40–69', value: mid, color: COLORS.scoreMid },
-      { name: '<40', value: lo, color: COLORS.scoreLo },
-    ];
-  }, [activeComputed]);
+  const dashboardMetrics = useDashboardMetrics({
+    activeComputed,
+    totalRows: rows.length,
+    lastUpdated,
+    palette: palette.chart,
+  });
 
-  const sankeyData = useMemo(() => {
-    const nUniverse = activeComputed.length;
-    const price = activeComputed.filter((entry) => entry.computed?.flags?.priceOK);
-    const ema = price.filter((entry) => entry.computed?.flags?.emaOK);
-    const rvol2 = ema.filter((entry) => entry.computed?.flags?.rvol2);
-    const ready = rvol2.filter((entry) => (entry.computed?.score || 0) >= 70);
-    return {
-      nodes: [
-        { name: `Universe (${nUniverse})` },
-        { name: `PrecioOK (${price.length})` },
-        { name: `EMAOK (${ema.length})` },
-        { name: `RVOL≥2 (${rvol2.length})` },
-        { name: `SCORE≥70 (${ready.length})` },
-      ],
-      links: [
-        { source: 0, target: 1, value: price.length },
-        { source: 1, target: 2, value: ema.length },
-        { source: 2, target: 3, value: rvol2.length },
-        { source: 3, target: 4, value: ready.length },
-      ],
-    };
-  }, [activeComputed]);
+  const {
+    timeRange,
+    setTimeRange,
+    kpis,
+    scoreDistribution,
+    sankeyData,
+    averageScore,
+    lastSnapshotTimestamp,
+    hasSnapshots,
+    clearHistory,
+  } = dashboardMetrics;
+
+  const scoreChartRef = useRef(null);
+  const sankeyChartRef = useRef(null);
+  const radarChartRef = useRef(null);
 
   const selectedRow = useMemo(() => {
     const found = rows.find((row) => row.id === selectedId);
@@ -453,12 +630,12 @@ function App() {
     const shortScore = scale(toNum(selectedRow?.shortPct), thresholds.shortMin);
     const scoreScore = Math.max(0, Math.min(100, r.score || 0));
     return [
-      { k: 'RVOL', v: rvolScore },
-      { k: '%día', v: chgScore },
-      { k: 'ATR%', v: atrScore },
-      { k: 'Rot', v: rotScore },
-      { k: 'Short%', v: shortScore },
-      { k: 'SCORE', v: scoreScore },
+      { k: 'RVOL', v: rvolScore, raw: r.rvol },
+      { k: '%día', v: chgScore, raw: r.chgPct },
+      { k: 'ATR%', v: atrScore, raw: r.atrPct },
+      { k: 'Rot', v: rotScore, raw: r.rotation },
+      { k: 'Short%', v: shortScore, raw: toNum(selectedRow?.shortPct) },
+      { k: 'SCORE', v: scoreScore, raw: r.score },
     ];
   }, [selectedCalc, selectedRow, thresholds]);
 
@@ -854,11 +1031,43 @@ function App() {
           </div>
         </header>
 
-        <section className="grid md:grid-cols-4 gap-4">
-          <Stat label="Tickers activos" value={safeInteger(kpis.total)} sub={`Total tabla: ${safeInteger(kpis.totalAll)}`} icon="📈" />
-          <Stat label="Ready ≥70" value={safeInteger(kpis.ready70)} sub="Listos para ejecución" icon="🚀" />
-          <Stat label="En juego" value={safeInteger(kpis.inPlay)} sub="RVOL + Precio + EMA" icon="🔥" />
-          <Stat label="Score máximo" value={safeInteger(kpis.top)} sub="Mejor setup actual" icon="🏆" />
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">KPIs agregados</h2>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-white/60">Rango:</span>
+              {TIME_RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTimeRange(option.key)}
+                  className={`px-2.5 py-1 rounded-full border ${timeRange === option.key ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10'} transition`}
+                >
+                  {option.label}
+                </button>
+              ))}
+              {hasSnapshots ? (
+                <button
+                  type="button"
+                  className="ml-2 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 transition"
+                  onClick={clearHistory}
+                >
+                  Limpiar historial
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="grid md:grid-cols-4 gap-4">
+            <Stat label="Tickers activos" value={safeInteger(kpis.total)} sub={`Total tabla: ${safeInteger(kpis.totalAll)}`} icon="📈" />
+            <Stat label="Ready ≥70" value={safeInteger(kpis.ready70)} sub="Listos para ejecución" icon="🚀" />
+            <Stat label="En juego" value={safeInteger(kpis.inPlay)} sub="RVOL + Precio + EMA" icon="🔥" />
+            <Stat label="Score máximo" value={safeInteger(kpis.top)} sub="Mejor setup" icon="🏆" />
+          </div>
+          <div className="text-xs text-white/50">
+            {lastSnapshotTimestamp
+              ? `Último registro: ${new Date(lastSnapshotTimestamp).toLocaleString()}`
+              : 'Sin historial almacenado aún.'}
+          </div>
         </section>
 
         <section className={`rounded-2xl ${COLORS.glass} p-6 shadow-xl`}>
@@ -1088,52 +1297,31 @@ function App() {
         </section>
 
         <section className="grid md:grid-cols-3 gap-4 mt-6">
-          <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px] relative`}>
-            <h3 className="font-semibold text-center mb-3">Distribución de SCORE</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Tooltip formatter={(value, name) => [value, name]} />
-                  <Pie data={scoreBuckets} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                    {scoreBuckets.map((entry, i) => <Cell key={`c-${i}`} fill={entry.color} />)}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <div className="text-2xl font-bold">{kpis.total}</div>
-                <div className="text-xs text-white/70">tickers</div>
-              </div>
-            </div>
-            <div className="mt-2 text-xs text-white/70 text-center">Nota: el centro muestra los tickers activos.</div>
-          </div>
-
-          <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
-            <h3 className="font-semibold text-center mb-3">Embudo de filtros</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <Sankey data={sankeyData} nodePadding={24} nodeWidth={12} linkCurvature={0.5} margin={{ left: 10, right: 10, top: 10, bottom: 10 }} />
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-2 text-xs text-white/70 text-center">Flujo: Universe → PrecioOK → EMAOK → RVOL≥2 → SCORE≥70.</div>
-          </div>
-
-          <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
-            <h3 className="font-semibold text-center mb-3">Perfil del ticker (Radar)</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={radarData} outerRadius={80}>
-                  <PolarGrid />
-                  <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
-                  <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
-                  <Radar dataKey="v" stroke="#38bdf8" fill="#38bdf8" fillOpacity={0.3} />
-                  <Tooltip formatter={(value, name) => [fmt(value, 0), name]} />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para seleccionarlo.</div>
-          </div>
+          <ScoreDistributionCard
+            ref={scoreChartRef}
+            data={scoreDistribution}
+            total={kpis.total}
+            averageScore={averageScore}
+            timeRange={timeRange}
+            onExport={exportChart}
+            theme={theme}
+          />
+          <FlowSankeyCard
+            ref={sankeyChartRef}
+            data={sankeyData}
+            timeRange={timeRange}
+            onExport={exportChart}
+            theme={theme}
+            accentColor={palette.chart.accent}
+          />
+          <PerformanceRadarCard
+            ref={radarChartRef}
+            data={radarData}
+            selectedRow={selectedRow}
+            onExport={exportChart}
+            theme={theme}
+            accentColor={palette.chart.accent}
+          />
         </section>
 
         <section className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl`}>
