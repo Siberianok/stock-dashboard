@@ -3,14 +3,21 @@ import { fetchQuotes } from '../services/yahooFinance.js';
 import { REQUIRED_FLAGS, UNIVERSE } from '../utils/constants.js';
 import { extractQuoteFields } from '../utils/quotes.js';
 
-export const scanUniverse = async ({ enabledMarkets, calc, fetcher }) => {
+export const scanUniverse = async ({ enabledMarkets, calc, fetcher, coverageThreshold = 0.8 }) => {
   const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
   if (!entries.length) {
-    return { matches: [], error: null };
+    return {
+      matches: [],
+      error: null,
+      coverage: { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false },
+    };
   }
   const symbolToMarket = Object.fromEntries(entries);
   const symbols = entries.map(([symbol]) => symbol);
-  const { quotes, error: quotesError } = await fetcher(symbols, { force: true });
+  const { quotes, error: quotesError, coverage: fetchCoverage } = await fetcher(symbols, {
+    force: true,
+    marketBySymbol: symbolToMarket,
+  });
   const matches = symbols.map((symbol) => {
     const quote = quotes[symbol];
     if (!quote) return null;
@@ -27,16 +34,27 @@ export const scanUniverse = async ({ enabledMarkets, calc, fetcher }) => {
     return { data, computed };
   }).filter(Boolean);
   matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
-  return { matches, error: quotesError || null };
+  const coverage = fetchCoverage || {
+    totalRequested: symbols.length,
+    totalFetched: matches.length,
+    ratio: symbols.length ? matches.length / symbols.length : 1,
+    alert: false,
+  };
+  const normalizedCoverage = {
+    ...coverage,
+    alert: coverage.ratio < coverageThreshold,
+  };
+  return { matches, error: quotesError || null, coverage: normalizedCoverage };
 };
 
-export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
+export const useScanner = ({ thresholds, calc, thresholdsKey, mode = 'live', coverageThreshold = 0.8 }) => {
   const [state, setState] = useState({
     matches: [],
     loading: false,
     error: null,
     lastUpdated: null,
     lastThresholdsKey: null,
+    coverage: { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false },
   });
   const latestThresholdsKeyRef = useRef(thresholdsKey);
   const lastRequestRef = useRef({ key: thresholdsKey, id: 0 });
@@ -61,19 +79,41 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
       abortRef.current = null;
     }
     if (!enabledMarkets.length) {
-      setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
+      setState({
+        matches: [],
+        loading: false,
+        error: null,
+        lastUpdated: null,
+        lastThresholdsKey: scanKey,
+        coverage: { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false },
+      });
       return;
     }
     setState((prev) => ({ ...prev, loading: true, error: null, lastThresholdsKey: scanKey }));
+    let controller;
     try {
       const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
       if (!entries.length) {
-        setState({ matches: [], loading: false, error: null, lastUpdated: null, lastThresholdsKey: scanKey });
+        setState({
+          matches: [],
+          loading: false,
+          error: null,
+          lastUpdated: null,
+          lastThresholdsKey: scanKey,
+          coverage: { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false },
+        });
         return;
       }
       const symbolToMarket = Object.fromEntries(entries);
       const symbols = entries.map(([symbol]) => symbol);
-      const { quotes, error: quotesError } = await fetchQuotes(symbols, { force: true });
+      controller = new AbortController();
+      abortRef.current = controller;
+      const { quotes, error: quotesError, coverage: quotesCoverage } = await fetchQuotes(symbols, {
+        force: true,
+        signal: controller.signal,
+        marketBySymbol: symbolToMarket,
+        mode,
+      });
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
       if (!isLatest) {
         return;
@@ -94,7 +134,24 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         return { data, computed };
       }).filter(Boolean);
       matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
-      setState({ matches, loading: false, error: quotesError || null, lastUpdated: new Date().toISOString(), lastThresholdsKey: scanKey });
+      const coverage = quotesCoverage || {
+        totalRequested: symbols.length,
+        totalFetched: matches.length,
+        ratio: symbols.length ? matches.length / symbols.length : 1,
+        alert: false,
+      };
+      const normalizedCoverage = {
+        ...coverage,
+        alert: coverage.ratio < coverageThreshold,
+      };
+      setState({
+        matches,
+        loading: false,
+        error: quotesError || null,
+        lastUpdated: new Date().toISOString(),
+        lastThresholdsKey: scanKey,
+        coverage: normalizedCoverage,
+      });
     } catch (error) {
       console.error(error);
       const isLatest = lastRequestRef.current.id === requestId && lastRequestRef.current.key === scanKey;
@@ -106,17 +163,18 @@ export const useScanner = ({ thresholds, calc, thresholdsKey }) => {
         loading: false,
         error: error?.message || 'Error al escanear universo',
         lastThresholdsKey: scanKey,
+        coverage: prev.coverage || { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false },
       }));
     } finally {
-      if (abortRef.current === controller) {
+      if (controller && abortRef.current === controller) {
         abortRef.current = null;
       }
     }
-  }, [calc, enabledMarkets]);
+  }, [calc, enabledMarkets, coverageThreshold, mode]);
 
   useEffect(() => {
     runScan(thresholdsKey);
-  }, [runScan, thresholdsKey]);
+  }, [runScan, thresholdsKey, mode]);
 
   useEffect(() => {
     const interval = window.setInterval(runScan, 60_000);
