@@ -17,7 +17,7 @@ import { fmt, safeInteger, safeNumber, safePct, toNum } from './utils/format.js'
 import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
 import { createCalc } from './utils/calc.js';
-import { fetchQuotes } from './services/yahooFinance.js';
+import { fetchQuotes, clearCache } from './services/yahooFinance.js';
 import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
@@ -383,7 +383,20 @@ const toCSVCell = (value) => {
 };
 
 function App() {
-  const { thresholds, thresholdsKey, updatePriceRange, updateLiquidityMin, toggleMarket, presetModerado, presetAgresivo, setThresholds } = useThresholds();
+  const {
+    thresholds,
+    history: thresholdsHistory,
+    thresholdsKey,
+    updatePriceRange,
+    updateLiquidityMin,
+    toggleMarket,
+    presetModerado,
+    presetAgresivo,
+    setThresholds,
+    undo: undoThresholds,
+    pushSnapshot,
+  } = useThresholds();
+  const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
@@ -422,9 +435,11 @@ function App() {
     return stored || null;
   });
   const [refreshToken, setRefreshToken] = useState(0);
+  const [dataMode, setDataMode] = useState('live');
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
+  const modeInitRef = useRef(true);
 
   useEffect(() => {
     if (!rows.length) return;
@@ -451,6 +466,15 @@ function App() {
 
   const tickers = useMemo(() => rows.map((r) => r.ticker).filter(Boolean), [rows]);
   const tickersKey = tickers.join(',');
+  const marketByTicker = useMemo(() => {
+    const map = {};
+    rows.forEach((row) => {
+      if (!row?.ticker) return;
+      map[row.ticker.toUpperCase()] = row.market || 'US';
+    });
+    return map;
+  }, [rows]);
+  const isSimulatedMode = dataMode === 'mock';
 
   useEffect(() => {
     if (!tickersKey) {
@@ -474,7 +498,12 @@ function App() {
       try {
         setLoadingQuotes(true);
         setFetchError(null);
-        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force, signal: controller.signal });
+        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, {
+          force,
+          signal: controller.signal,
+          marketBySymbol: marketByTicker,
+          mode: dataMode,
+        });
         if (!active || quotesAbortRef.current !== controller || controller.signal.aborted) {
           return;
         }
@@ -512,9 +541,18 @@ function App() {
         quotesAbortRef.current = null;
       }
     };
-  }, [tickersKey, refreshToken, tickers, setRows]);
+  }, [tickersKey, refreshToken, tickers, setRows, marketByTicker, dataMode]);
 
   const refreshQuotes = useCallback(() => setRefreshToken(Date.now()), []);
+
+  useEffect(() => {
+    clearCache();
+    if (modeInitRef.current) {
+      modeInitRef.current = false;
+      return;
+    }
+    setRefreshToken(Date.now());
+  }, [dataMode]);
 
   const lastUpdated = useMemo(() => {
     const stamps = rows.map((r) => r.lastUpdate).filter(Boolean);
@@ -601,7 +639,13 @@ function App() {
     ];
   }, [selectedCalc, selectedRow, thresholds]);
 
-  const { state: scannerState, triggerScan } = useScanner({ thresholds, calc, thresholdsKey });
+  const { state: scannerState, triggerScan } = useScanner({
+    thresholds,
+    calc,
+    thresholdsKey,
+    mode: dataMode,
+    coverageThreshold: 0.8,
+  });
   const scannerMatchesRaw = scannerState.matches || [];
   const scannerLoading = !!scannerState.loading;
   const scannerError = scannerState.error;
@@ -621,6 +665,20 @@ function App() {
     const d = new Date(scannerState.lastUpdated);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }, [scannerState.lastUpdated]);
+
+  const scannerCoverageLabel = useMemo(() => {
+    const coverage = scannerState.coverage;
+    if (!coverage) return 'Cobertura: —';
+    const total = coverage.totalRequested || 0;
+    if (!total) return 'Cobertura: 0/0';
+    const pct = Math.round((coverage.ratio || 0) * 100);
+    return `Cobertura: ${coverage.totalFetched}/${total} (${pct}%)`;
+  }, [scannerState.coverage]);
+  const scannerCoverageAlert = !!scannerState.coverage?.alert;
+
+  const toggleDataMode = useCallback(() => {
+    setDataMode((prev) => (prev === 'live' ? 'mock' : 'live'));
+  }, []);
 
   const sortByScore = useCallback(() => {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
@@ -941,20 +999,35 @@ function App() {
             </div>
           </div>
           <div className={`rounded-2xl ${COLORS.glass} p-4 text-sm max-w-xs space-y-3`}>
-            <div className="flex items-center justify-between gap-2">
+            <div>
               <div className="text-xs uppercase tracking-wide text-white/60">Presets rápidos</div>
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 transition text-xs"
-                aria-label="Cambiar tema"
-              >
-                {theme === 'dark' ? '🌙' : '☀️'}
-              </button>
+              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
+              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
             </div>
-            <button className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
-            <button className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
-            <div className="text-[11px] text-white/60">Tema actual: {theme === 'dark' ? 'Oscuro' : 'Claro'}</div>
+            <div className="pt-3 border-t border-white/10 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-white/60">Historial de umbrales</div>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => pushSnapshot('Manual')}
+              >
+                Guardar snapshot
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!thresholdsHistory.length}
+                onClick={undoThresholds}
+              >
+                Deshacer último cambio
+              </button>
+              {lastThresholdSnapshot ? (
+                <p className="text-[11px] text-white/60 leading-snug">
+                  Último snapshot: {lastThresholdSnapshot.label || 'Sin título'} ·{' '}
+                  {new Date(lastThresholdSnapshot.savedAt).toLocaleString()}
+                </p>
+              ) : (
+                <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
+              )}
+            </div>
           </div>
         </header>
 
@@ -1258,19 +1331,41 @@ function App() {
               <div className="text-xs text-white/60 mt-0.5">Universo predefinido filtrado en tiempo real según todos los criterios activos.</div>
             </div>
             <div className="flex flex-col gap-2 items-end sm:flex-row sm:items-center sm:gap-3">
-              <div className="text-xs text-white/60">
-                Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : '—'}
-                {scannerLoading ? ' · escaneando' : ''}
-                {scannerResultsStale ? ' · filtros actualizados' : ''}
+              <div className="flex flex-col items-end gap-1 text-xs text-white/60">
+                <div>
+                  Actualizado: {scannerState.lastUpdated ? scannerUpdatedLabel : '—'}
+                  {scannerLoading ? ' · escaneando' : ''}
+                  {scannerResultsStale ? ' · filtros actualizados' : ''}
+                </div>
+                <div className={scannerCoverageAlert ? 'text-amber-200' : 'text-white/60'}>
+                  {scannerCoverageLabel}
+                  {scannerCoverageAlert ? ' · cobertura parcial' : ''}
+                </div>
+                {isSimulatedMode ? (
+                  <div className="text-[11px] uppercase tracking-wide text-emerald-200">Modo simulado activo</div>
+                ) : null}
               </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading}>Escanear ahora</button>
-                <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length}>Cargar en tabla</button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  className={`px-3 py-1.5 rounded-xl border border-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed hover:bg-white/20 ${
+                    isSimulatedMode ? 'bg-white/20 text-white' : 'bg-white/10 text-white/90'
+                  }`}
+                  onClick={toggleDataMode}
+                  disabled={scannerLoading}
+                  type="button"
+                >
+                  {isSimulatedMode ? 'Usar datos reales' : 'Activar modo simulado'}
+                </button>
+                <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading} type="button">Escanear ahora</button>
+                <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length} type="button">Cargar en tabla</button>
               </div>
             </div>
           </div>
           <div className="p-4 space-y-4">
             {scannerError ? <div className="text-xs text-rose-300">Error: {scannerError}</div> : null}
+            {scannerCoverageAlert && !scannerError ? (
+              <div className="text-xs text-amber-200">Cobertura inferior al 80%. Revisa la conexión o reduce el universo para evitar huecos en la actualización.</div>
+            ) : null}
             {scannerResultsStale ? <div className="text-xs text-amber-200">Esperando resultados con los nuevos filtros…</div> : null}
             {scannerLoading && !scannerMatches.length ? <div className="text-sm text-white/70">Buscando coincidencias...</div> : null}
             {!scannerResultsStale && !scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
