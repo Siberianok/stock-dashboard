@@ -23,6 +23,9 @@ import { useScanner } from './hooks/useScanner.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
 import { Badge } from './components/Badge.jsx';
+import { subscribeToMetrics } from './utils/metrics.js';
+import { subscribeToLogs, logError } from './utils/logger.js';
+import { DiagnosticsPanel } from './components/DiagnosticsPanel.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -121,6 +124,7 @@ const createRow = (overrides = {}) => ({
   intradiaOK: false,
   comments: '',
   lastUpdate: null,
+  isStale: false,
   ...overrides,
 });
 
@@ -134,10 +138,10 @@ const loadStoredRows = () => {
     return parsed
       .map((entry) => (entry && typeof entry === 'object' ? createRow({ ...entry, id: entry.id || uid() }) : null))
       .filter(Boolean);
-  } catch (error) {
-    console.error('No se pudieron leer filas guardadas', error);
-    return null;
-  }
+    } catch (error) {
+      logError('rows.storage.load', error);
+      return null;
+    }
 };
 
 const useTickerRows = () => {
@@ -165,7 +169,7 @@ const useTickerRows = () => {
       const serializable = rows.map((row) => ({ ...row }));
       window.localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(serializable));
     } catch (error) {
-      console.error('No se pudieron guardar las filas', error);
+      logError('rows.storage.save', error);
     }
   }, [rows]);
   return { rows, setRows, addRow, clearRows, updateRow };
@@ -246,7 +250,7 @@ function App() {
         window.localStorage.setItem(SELECTED_ROW_STORAGE_KEY, selectedId);
       }
     } catch (error) {
-      console.error('No se pudo guardar la selección de fila', error);
+      logError('rows.selection.save', error);
     }
   }, [selectedId]);
 
@@ -275,7 +279,11 @@ function App() {
       try {
         setLoadingQuotes(true);
         setFetchError(null);
-        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, { force, signal: controller.signal });
+        const { quotes, error: quotesError, staleSymbols } = await fetchQuotes(tickers, {
+          force,
+          signal: controller.signal,
+          requestKey: 'table',
+        });
         if (!active || quotesAbortRef.current !== controller || controller.signal.aborted) {
           return;
         }
@@ -286,14 +294,14 @@ function App() {
           if (!quote) return row;
           const fields = extractQuoteFields(quote);
           const nextLastUpdate = staleSet.has(symbolKey) ? row.lastUpdate : new Date().toISOString();
-          return { ...row, ...fields, lastUpdate: nextLastUpdate };
+          return { ...row, ...fields, lastUpdate: nextLastUpdate, isStale: staleSet.has(symbolKey) };
         }));
         setFetchError(quotesError || null);
       } catch (error) {
         if (!active || quotesAbortRef.current !== controller || error?.name === 'AbortError') {
           return;
         }
-        console.error(error);
+        logError('quotes.fetch', error);
         setFetchError(error?.message || 'Error al actualizar datos');
       } finally {
         if (!active) return;
@@ -317,6 +325,14 @@ function App() {
 
   const refreshQuotes = useCallback(() => setRefreshToken(Date.now()), []);
 
+  const [timeReference, setTimeReference] = useState(Date.now());
+
+  useEffect(() => {
+    if (!isBrowser) return () => {};
+    const interval = window.setInterval(() => setTimeReference(Date.now()), 5_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   const lastUpdated = useMemo(() => {
     const stamps = rows.map((r) => r.lastUpdate).filter(Boolean);
     if (!stamps.length) return null;
@@ -328,6 +344,26 @@ function App() {
     const d = new Date(lastUpdated);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }, [lastUpdated]);
+
+  const staleInfo = useMemo(() => {
+    if (!lastUpdated) {
+      return { isStale: false, ageSeconds: null };
+    }
+    const ageMs = Math.max(0, timeReference - new Date(lastUpdated).getTime());
+    return { isStale: ageMs > 60_000, ageSeconds: Math.floor(ageMs / 1000) };
+  }, [lastUpdated, timeReference]);
+
+  const [metrics, setMetrics] = useState([]);
+  const [logs, setLogs] = useState([]);
+
+  useEffect(() => {
+    const unsubscribeMetrics = subscribeToMetrics(setMetrics);
+    const unsubscribeLogs = subscribeToLogs(setLogs);
+    return () => {
+      unsubscribeMetrics();
+      unsubscribeLogs();
+    };
+  }, []);
 
   const computedRows = useMemo(
     () =>
@@ -433,7 +469,9 @@ function App() {
 
   const applyMatchesToTable = useCallback(() => {
     if (!scannerMatches.length) return;
-    const next = scannerMatches.map(({ data }) => createRow({ ...data, lastUpdate: scannerState.lastUpdated }));
+    const next = scannerMatches.map(({ data }) =>
+      createRow({ ...data, lastUpdate: scannerState.lastUpdated, isStale: false }),
+    );
     setRows(next);
     setSelectedId(next[0]?.id || null);
     setRefreshToken(Date.now());
@@ -626,6 +664,7 @@ function App() {
         intradiaOK: true,
         comments: 'Gap + volumen explosivo',
         lastUpdate: now,
+        isStale: false,
       }),
       createRow({
         ticker: 'PLTR',
@@ -649,6 +688,7 @@ function App() {
         intradiaOK: true,
         comments: 'Rompió consolidación diaria',
         lastUpdate: now,
+        isStale: false,
       }),
       createRow({
         ticker: 'GGAL.BA',
@@ -672,6 +712,7 @@ function App() {
         intradiaOK: false,
         comments: 'Impulso tras resultados trimestrales',
         lastUpdate: now,
+        isStale: false,
       }),
       createRow({
         ticker: 'PETR4.SA',
@@ -695,6 +736,7 @@ function App() {
         intradiaOK: true,
         comments: 'Reacción a datos de producción',
         lastUpdate: now,
+        isStale: false,
       }),
       createRow({
         ticker: 'AIR.PA',
@@ -718,6 +760,7 @@ function App() {
         intradiaOK: true,
         comments: 'Pedidos récord en cartera',
         lastUpdate: now,
+        isStale: false,
       }),
       createRow({
         ticker: 'TSLA',
@@ -741,6 +784,7 @@ function App() {
         intradiaOK: false,
         comments: 'Rumores de nuevo modelo',
         lastUpdate: now,
+        isStale: false,
       }),
     ];
     setRows(demoRows);
@@ -1162,7 +1206,11 @@ function App() {
           lastUpdatedLabel={lastUpdatedLabel}
           loading={loadingQuotes}
           fetchError={fetchError}
+          stale={staleInfo.isStale}
+          staleSeconds={staleInfo.ageSeconds}
         />
+
+        <DiagnosticsPanel metrics={metrics} logs={logs} />
 
         <div className="mt-4 text-xs text-white/70 text-center">
           <p>Tips: Seleccioná el mercado para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>

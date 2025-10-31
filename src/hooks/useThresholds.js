@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
+import { logError } from '../utils/logger.js';
 import {
   DEFAULT_THRESHOLDS,
   applyPresetModerado,
@@ -96,7 +97,7 @@ const loadStoredThresholds = () => {
     const parsed = JSON.parse(raw);
     return sanitizeThresholds(parsed);
   } catch (error) {
-    console.error('No se pudieron leer umbrales guardados', error);
+    logError('thresholds.storage.load', error);
     return DEFAULT_THRESHOLDS;
   }
 };
@@ -109,7 +110,7 @@ export function useThresholds() {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(thresholds));
     } catch (error) {
-      console.error('No se pudieron guardar los umbrales', error);
+      logError('thresholds.storage.save', error);
     }
   }, [thresholds]);
 
