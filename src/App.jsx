@@ -184,7 +184,20 @@ const toCSVCell = (value) => {
 };
 
 function App() {
-  const { thresholds, thresholdsKey, updatePriceRange, updateLiquidityMin, toggleMarket, presetModerado, presetAgresivo, setThresholds } = useThresholds();
+  const {
+    thresholds,
+    history: thresholdsHistory,
+    thresholdsKey,
+    updatePriceRange,
+    updateLiquidityMin,
+    toggleMarket,
+    presetModerado,
+    presetAgresivo,
+    setThresholds,
+    undo: undoThresholds,
+    pushSnapshot,
+  } = useThresholds();
+  const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
@@ -763,10 +776,36 @@ function App() {
               <button className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 transition" onClick={refreshQuotes}>Refrescar precios</button>
             </div>
           </div>
-          <div className={`rounded-2xl ${COLORS.glass} p-4 text-sm max-w-xs space-y-2`}>
-            <div className="text-xs uppercase tracking-wide text-white/60">Presets rápidos</div>
-            <button className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
-            <button className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
+          <div className={`rounded-2xl ${COLORS.glass} p-4 text-sm max-w-xs space-y-3`}>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-white/60">Presets rápidos</div>
+              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
+              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
+            </div>
+            <div className="pt-3 border-t border-white/10 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-white/60">Historial de umbrales</div>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => pushSnapshot('Manual')}
+              >
+                Guardar snapshot
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!thresholdsHistory.length}
+                onClick={undoThresholds}
+              >
+                Deshacer último cambio
+              </button>
+              {lastThresholdSnapshot ? (
+                <p className="text-[11px] text-white/60 leading-snug">
+                  Último snapshot: {lastThresholdSnapshot.label || 'Sin título'} ·{' '}
+                  {new Date(lastThresholdSnapshot.savedAt).toLocaleString()}
+                </p>
+              ) : (
+                <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
+              )}
+            </div>
           </div>
         </header>
 
