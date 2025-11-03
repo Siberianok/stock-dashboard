@@ -175,6 +175,12 @@ export function useThresholds() {
         if (!(field in prevMarket)) return draft;
         const nextMarket = { ...prevMarket };
         delete nextMarket[field];
+        const nextPriceRange = { ...prev.priceRange };
+        if (Object.keys(nextMarket).length) {
+          nextPriceRange[market] = nextMarket;
+        } else {
+          delete nextPriceRange[market];
+        }
         return {
           ...draft,
           priceRange: {

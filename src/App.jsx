@@ -18,6 +18,7 @@ import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
 import { createCalc } from './utils/calc.js';
 import { fetchQuotes, clearCache } from './services/yahooFinance.js';
+import { computeFilterPreview } from './services/filterPreview.js';
 import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
@@ -476,6 +477,14 @@ function App() {
   }, [setFieldError]);
 
   const getError = useCallback((key) => validationErrors[key] || null, [validationErrors]);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const hasValidationErrors = useMemo(() => Object.keys(validationErrors).length > 0, [validationErrors]);
+  const previewDisabled = hasValidationErrors;
+  const previewHelperMessage = hasValidationErrors
+    ? 'Corregí los campos con error para habilitar la vista previa.'
+    : !hasDraftChanges
+      ? 'No hay diferencias entre el borrador y los umbrales aplicados.'
+      : null;
   const [selectedId, setSelectedId] = useState(() => {
     if (!isBrowser) return null;
     const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
@@ -688,16 +697,16 @@ function App() {
       rows.map((row) => ({
         row,
         computed: calc(row, row.market || 'US'),
-        isActive: thresholds.marketsEnabled?.[row.market || 'US'] !== false,
+        isActive: appliedThresholds.marketsEnabled?.[row.market || 'US'] !== false,
       })),
-    [rows, calc, thresholds.marketsEnabled],
+    [rows, calc, appliedThresholds.marketsEnabled],
   );
 
   const activeComputed = useMemo(() => computedRows.filter((entry) => entry.isActive), [computedRows]);
 
   const visibleRows = useMemo(
-    () => rows.filter((row) => thresholds.marketsEnabled?.[row.market || 'US'] !== false),
-    [rows, thresholds.marketsEnabled],
+    () => rows.filter((row) => appliedThresholds.marketsEnabled?.[row.market || 'US'] !== false),
+    [rows, appliedThresholds.marketsEnabled],
   );
 
   const { theme, toggleTheme, palette } = useTheme();
@@ -745,11 +754,11 @@ function App() {
       if (val === undefined || thr === 0 || thr === undefined) return 0;
       return Math.max(0, Math.min(100, (val / thr) * 100));
     };
-    const rvolScore = scale(r.rvol, thresholds.rvolIdeal);
-    const chgScore = scale(r.chgPct, thresholds.parabolic50 ? 50 : thresholds.chgMin);
-    const atrScore = scale(r.atrPct, thresholds.atrPctMin * 2);
-    const rotScore = scale(r.rotation, thresholds.rotationIdeal);
-    const shortScore = scale(toNum(selectedRow?.shortPct), thresholds.shortMin);
+    const rvolScore = scale(r.rvol, appliedThresholds.rvolIdeal);
+    const chgScore = scale(r.chgPct, appliedThresholds.parabolic50 ? 50 : appliedThresholds.chgMin);
+    const atrScore = scale(r.atrPct, appliedThresholds.atrPctMin * 2);
+    const rotScore = scale(r.rotation, appliedThresholds.rotationIdeal);
+    const shortScore = scale(toNum(selectedRow?.shortPct), appliedThresholds.shortMin);
     const scoreScore = Math.max(0, Math.min(100, r.score || 0));
     return [
       { k: 'RVOL', v: rvolScore, raw: r.rvol },
@@ -759,7 +768,7 @@ function App() {
       { k: 'Short%', v: shortScore, raw: toNum(selectedRow?.shortPct) },
       { k: 'SCORE', v: scoreScore, raw: r.score },
     ];
-  }, [selectedCalc, selectedRow, thresholds]);
+  }, [selectedCalc, selectedRow, appliedThresholds]);
 
   const { state: scannerState, triggerScan } = useScanner({
     thresholds: activeThresholds,
@@ -829,6 +838,42 @@ function App() {
     setDataMode((prev) => (prev === 'live' ? 'mock' : 'live'));
   }, []);
 
+  const openPreview = useCallback(async () => {
+    if (previewDisabled) {
+      return;
+    }
+    setPreviewOpen(true);
+    startPreview();
+    try {
+      const result = await Promise.resolve(
+        computeFilterPreview({
+          appliedThresholds,
+          draftThresholds,
+        }),
+      );
+      completePreview(result);
+    } catch (error) {
+      logError('thresholds.preview', error);
+      failPreview(error?.message || 'No se pudo calcular la vista previa');
+    }
+  }, [previewDisabled, startPreview, appliedThresholds, draftThresholds, completePreview, failPreview]);
+
+  const closePreview = useCallback(() => {
+    setPreviewOpen(false);
+    clearPreview();
+  }, [clearPreview]);
+
+  const handleApplyPreview = useCallback(() => {
+    applyDraft({ label: 'Vista previa' });
+    closePreview();
+  }, [applyDraft, closePreview]);
+
+  const handleCancelPreview = useCallback(() => {
+    resetDraft();
+    setValidationErrors({});
+    closePreview();
+  }, [resetDraft, closePreview, setValidationErrors]);
+
   const sortByScore = useCallback(() => {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
   }, [calc, setRows]);
@@ -853,7 +898,7 @@ function App() {
     {
       key: 'rvolMin',
       label: 'RVOL ≥',
-      value: thresholds.rvolMin,
+      value: draftThresholds.rvolMin,
       step: '0.1',
       min: 0,
       allowZero: false,
@@ -863,13 +908,13 @@ function App() {
     {
       key: 'rvolIdeal',
       label: 'RVOL ideal ≥',
-      value: thresholds.rvolIdeal,
+      value: draftThresholds.rvolIdeal,
       step: '0.1',
-      min: thresholds.rvolMin || 0,
+      min: draftThresholds.rvolMin || 0,
       allowZero: false,
       formatter: (val) => fmt(val, 1),
       validate: (value) => {
-        const minVal = thresholds.rvolMin;
+        const minVal = draftThresholds.rvolMin;
         if (Number.isFinite(minVal) && value < minVal) {
           return `Debe ser ≥ ${fmt(minVal, 1)}`;
         }
@@ -880,13 +925,13 @@ function App() {
     {
       key: 'float50',
       label: 'Float < (M)',
-      value: thresholds.float50,
+      value: draftThresholds.float50,
       step: '1',
       min: 0.1,
       allowZero: false,
       formatter: (val) => fmt(val, 0),
       validate: (value) => {
-        const pref = thresholds.float10;
+        const pref = draftThresholds.float10;
         if (Number.isFinite(pref) && value < pref) {
           return `Debe ser ≥ pref (${fmt(pref, 0)})`;
         }
@@ -897,14 +942,14 @@ function App() {
     {
       key: 'float10',
       label: 'Pref. Float < (M)',
-      value: thresholds.float10,
+      value: draftThresholds.float10,
       step: '1',
       min: 0.1,
       allowZero: false,
       formatter: (val) => fmt(val, 0),
-      max: thresholds.float50,
+      max: draftThresholds.float50,
       validate: (value) => {
-        const maxVal = thresholds.float50;
+        const maxVal = draftThresholds.float50;
         if (Number.isFinite(maxVal) && value > maxVal) {
           return `Debe ser ≤ máx (${fmt(maxVal, 0)})`;
         }
@@ -915,7 +960,7 @@ function App() {
     {
       key: 'rotationMin',
       label: 'Rotación ≥',
-      value: thresholds.rotationMin,
+      value: draftThresholds.rotationMin,
       step: '0.1',
       min: 0.1,
       allowZero: false,
@@ -925,13 +970,13 @@ function App() {
     {
       key: 'rotationIdeal',
       label: 'Rotación ideal ≥',
-      value: thresholds.rotationIdeal,
+      value: draftThresholds.rotationIdeal,
       step: '0.1',
-      min: thresholds.rotationMin || 0.1,
+      min: draftThresholds.rotationMin || 0.1,
       allowZero: false,
       formatter: (val) => fmt(val, 1),
       validate: (value) => {
-        const minVal = thresholds.rotationMin;
+        const minVal = draftThresholds.rotationMin;
         if (Number.isFinite(minVal) && value < minVal) {
           return `Debe ser ≥ ${fmt(minVal, 1)}`;
         }
@@ -1276,6 +1321,39 @@ function App() {
 
         <section className={`rounded-2xl ${COLORS.glass} p-6 shadow-xl`}>
           <h2 className="text-xl font-semibold mb-4">Umbrales por mercado</h2>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-5 text-sm">
+            <div>
+              <div className="font-medium text-white/90">
+                {hasDraftChanges ? 'Borrador con cambios sin aplicar' : 'Borrador sincronizado con los umbrales aplicados'}
+              </div>
+              {previewHelperMessage ? (
+                <div className={`text-xs ${hasValidationErrors ? 'text-rose-300' : 'text-white/60'}`}>
+                  {previewHelperMessage}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => {
+                  resetDraft();
+                  setValidationErrors({});
+                }}
+                disabled={!hasDraftChanges}
+              >
+                Descartar cambios
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-xl bg-sky-500/90 text-white hover:bg-sky-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={openPreview}
+                disabled={previewDisabled}
+              >
+                Vista previa
+              </button>
+            </div>
+          </div>
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="space-y-4">
               <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={marketsLegendId}>
@@ -1292,7 +1370,7 @@ function App() {
                       <input
                         type="checkbox"
                         aria-label={`Habilitar mercado ${info.label}`}
-                        checked={!!thresholds.marketsEnabled?.[key]}
+                        checked={!!draftThresholds.marketsEnabled?.[key]}
                         onChange={(e) => toggleMarket(key, e.target.checked)}
                       />
                     </label>
@@ -1711,7 +1789,7 @@ function App() {
 
         <TickerTable
           rows={visibleRows}
-          thresholds={thresholds}
+          thresholds={appliedThresholds}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onUpdate={updateRow}
@@ -1725,6 +1803,172 @@ function App() {
           stale={staleInfo.isStale}
           staleSeconds={staleInfo.ageSeconds}
         />
+
+        {isPreviewOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={closePreview} />
+            <div
+              className="relative z-10 w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-900/95 p-6 shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="preview-title"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 id="preview-title" className="text-xl font-semibold text-white">Vista previa de filtros</h3>
+                  <p className="text-sm text-white/60 mt-1">Compará el borrador contra la versión aplicada sin persistir cambios.</p>
+                  {previewEvaluatedAt ? (
+                    <p className="text-xs text-white/50 mt-2">Generada {new Date(previewEvaluatedAt).toLocaleString()}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="text-white/60 hover:text-white"
+                  onClick={closePreview}
+                  aria-label="Cerrar vista previa"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-5 space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {previewLoading ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-sm text-white/70">
+                    Calculando vista previa...
+                  </div>
+                ) : previewError ? (
+                  <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+                    No se pudo generar la vista previa: {previewError}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl bg-white/5 p-4">
+                        <div className="text-xs uppercase tracking-wide text-white/60">Tickers evaluados</div>
+                        <div className="text-2xl font-semibold text-white">{previewSummary.total}</div>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-500/10 p-4">
+                        <div className="text-xs uppercase tracking-wide text-emerald-200/80">Aprueban con borrador</div>
+                        <div className="text-2xl font-semibold text-emerald-200">{previewSummary.draftPass}</div>
+                        <div className="text-[11px] text-emerald-100/80">Aplicado: {previewSummary.appliedPass}</div>
+                      </div>
+                      <div className="rounded-2xl bg-cyan-500/10 p-4">
+                        <div className="text-xs uppercase tracking-wide text-cyan-100/80">Cambios relevantes</div>
+                        <div className="text-2xl font-semibold text-cyan-100">
+                          {previewEntries.filter((entry) => entry.status !== 'unchanged' && entry.status !== 'stillFailing').length}
+                        </div>
+                        <div className="text-[11px] text-cyan-100/70">Nuevos: {previewSummary.added} · Salen: {previewSummary.removed}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/50">
+                      Permanecen fuera del filtro: {previewSummary.stillFailing}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4">
+                        <h4 className="mb-2 text-sm font-semibold text-emerald-100">Ingresan ({previewGroups.added.length})</h4>
+                        {previewGroups.added.length ? (
+                          <ul className="space-y-2 text-xs text-emerald-100/80">
+                            {previewGroups.added.map((entry) => (
+                              <li key={`add-${entry.ticker}`} className="rounded-lg border border-emerald-400/30 bg-emerald-500/15 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <div className="font-semibold uppercase tracking-wide text-emerald-100">{entry.ticker}</div>
+                                    <div className="text-[11px] text-emerald-200/80">{entry.market}</div>
+                                  </div>
+                                  <div className="text-sm font-semibold text-emerald-100">SCORE {formatScore(entry.draft.score)}</div>
+                                </div>
+                                {entry.flagChanges.gained.length ? (
+                                  <div className="mt-2 text-[11px] text-emerald-200">
+                                    Flags nuevas: {entry.flagChanges.gained.join(', ')}
+                                  </div>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-emerald-100/70">Sin ingresos nuevos.</p>
+                        )}
+                      </div>
+                      <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4">
+                        <h4 className="mb-2 text-sm font-semibold text-rose-200">Salen ({previewGroups.removed.length})</h4>
+                        {previewGroups.removed.length ? (
+                          <ul className="space-y-2 text-xs text-rose-100/80">
+                            {previewGroups.removed.map((entry) => (
+                              <li key={`removed-${entry.ticker}`} className="rounded-lg border border-rose-400/30 bg-rose-500/15 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <div className="font-semibold uppercase tracking-wide text-rose-200">{entry.ticker}</div>
+                                    <div className="text-[11px] text-rose-200/70">{entry.market}</div>
+                                  </div>
+                                  <div className="text-sm font-semibold text-rose-200">SCORE {formatScore(entry.applied.score)}</div>
+                                </div>
+                                {entry.flagChanges.lost.length ? (
+                                  <div className="mt-2 text-[11px] text-rose-200">
+                                    Pierde: {entry.flagChanges.lost.join(', ')}
+                                  </div>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-rose-100/70">No se eliminan candidatos actuales.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <h4 className="mb-2 text-sm font-semibold text-white">Variaciones de SCORE ({previewGroups.improved.length + previewGroups.regressed.length})</h4>
+                      {previewGroups.improved.length || previewGroups.regressed.length ? (
+                        <ul className="space-y-2 text-xs text-white/80">
+                          {[...previewGroups.improved, ...previewGroups.regressed].map((entry) => (
+                            <li key={`delta-${entry.ticker}`} className="flex items-center justify-between gap-2 rounded-lg bg-white/10 px-3 py-2">
+                              <div>
+                                <div className="font-semibold text-white">{entry.ticker}</div>
+                                <div className="text-[11px] text-white/60">
+                                  {formatScore(entry.applied.score)} → {formatScore(entry.draft.score)}
+                                </div>
+                              </div>
+                              <span className={`text-sm font-semibold ${entry.scoreDelta >= 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                                {formatScoreDelta(entry.scoreDelta)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-white/60">Sin variaciones relevantes en SCORE.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition text-sm"
+                  onClick={closePreview}
+                >
+                  Cerrar
+                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleCancelPreview}
+                    disabled={previewLoading}
+                  >
+                    Descartar borrador
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/90 text-white hover:bg-emerald-500 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleApplyPreview}
+                    disabled={applyDisabled}
+                  >
+                    Aplicar cambios
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <DiagnosticsPanel metrics={metrics} logs={logs} />
 
