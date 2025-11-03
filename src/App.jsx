@@ -18,7 +18,6 @@ import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
 import { createCalc } from './utils/calc.js';
 import { fetchQuotes, clearCache } from './services/yahooFinance.js';
-import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
 import { useTheme } from './hooks/useTheme.js';
@@ -29,6 +28,8 @@ import { Badge } from './components/Badge.jsx';
 import { subscribeToMetrics } from './utils/metrics.js';
 import { subscribeToLogs, logError } from './utils/logger.js';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel.jsx';
+import { useFilterForm } from './store/filterStore.js';
+import { FiltersPanel } from './components/filters/FiltersPanel.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -237,65 +238,6 @@ const PerformanceRadarCard = memo(
   }),
 );
 
-const parseNumberInput = (input) => {
-  const value =
-    input && typeof input === 'object' && 'target' in input ? input.target?.value : input;
-  if (value === '' || value === null || value === undefined) return undefined;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : undefined;
-};
-
-const formatValueForError = (value, formatter) => {
-  try {
-    return formatter(value);
-  } catch (error) {
-    return String(value);
-  }
-};
-
-const validateNumericValue = (value, options = {}) => {
-  const {
-    allowEmpty = true,
-    allowZero = true,
-    min = Number.NEGATIVE_INFINITY,
-    max = Number.POSITIVE_INFINITY,
-    formatter = (val) => (typeof val === 'number' ? val.toString() : String(val)),
-    validate,
-  } = options;
-
-  if (value === undefined || value === null || value === '') {
-    if (allowEmpty) {
-      return { error: null, value: undefined };
-    }
-    return { error: 'Requerido', value: undefined };
-  }
-
-  if (!Number.isFinite(value)) {
-    return { error: 'Debe ser un número válido', value: undefined };
-  }
-
-  if (!allowZero && value === 0) {
-    return { error: 'Debe ser mayor a 0', value: undefined };
-  }
-
-  if (Number.isFinite(min) && value < min) {
-    return { error: `Debe ser ≥ ${formatValueForError(min, formatter)}`, value: undefined };
-  }
-
-  if (Number.isFinite(max) && value > max) {
-    return { error: `Debe ser ≤ ${formatValueForError(max, formatter)}`, value: undefined };
-  }
-
-  if (typeof validate === 'function') {
-    const customError = validate(value);
-    if (typeof customError === 'string' && customError.trim()) {
-      return { error: customError, value: undefined };
-    }
-  }
-
-  return { error: null, value };
-};
-
 const ROWS_STORAGE_KEY = 'selector.rows.v1';
 const SELECTED_ROW_STORAGE_KEY = 'selector.selectedRowId.v1';
 const isBrowser = typeof window !== 'undefined';
@@ -387,52 +329,19 @@ const toCSVCell = (value) => {
 };
 
 function App() {
+  const filterForm = useFilterForm();
   const {
     thresholds,
     history: thresholdsHistory,
     thresholdsKey,
-    updatePriceRange,
-    updateLiquidityMin,
-    toggleMarket,
     presetModerado,
     presetAgresivo,
-    setThresholds,
     undo: undoThresholds,
     pushSnapshot,
-  } = useThresholds();
+  } = filterForm;
   const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
-  const [validationErrors, setValidationErrors] = useState({});
-  const setFieldError = useCallback((key, message) => {
-    setValidationErrors((prev) => {
-      if (message) {
-        if (prev[key] === message) {
-          return prev;
-        }
-        return { ...prev, [key]: message };
-      }
-      if (!(key in prev)) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
-
-  const applyNumericUpdate = useCallback((key, value, onValid, options = {}) => {
-    const { error, value: nextValue } = validateNumericValue(value, options);
-    if (error) {
-      setFieldError(key, error);
-      return;
-    }
-
-    setFieldError(key, null);
-    onValid(nextValue);
-  }, [setFieldError]);
-
-  const getError = useCallback((key) => validationErrors[key] || null, [validationErrors]);
   const [selectedId, setSelectedId] = useState(() => {
     if (!isBrowser) return null;
     const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
@@ -709,98 +618,6 @@ function App() {
   const sortByScore = useCallback(() => {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
   }, [calc, setRows]);
-
-  const volumeInputs = [
-    {
-      key: 'rvolMin',
-      label: 'RVOL ≥',
-      value: thresholds.rvolMin,
-      step: '0.1',
-      min: 0,
-      allowZero: false,
-      formatter: (val) => fmt(val, 1),
-      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolMin: value })),
-    },
-    {
-      key: 'rvolIdeal',
-      label: 'RVOL ideal ≥',
-      value: thresholds.rvolIdeal,
-      step: '0.1',
-      min: thresholds.rvolMin || 0,
-      allowZero: false,
-      formatter: (val) => fmt(val, 1),
-      validate: (value) => {
-        const minVal = thresholds.rvolMin;
-        if (Number.isFinite(minVal) && value < minVal) {
-          return `Debe ser ≥ ${fmt(minVal, 1)}`;
-        }
-        return null;
-      },
-      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolIdeal: value })),
-    },
-    {
-      key: 'float50',
-      label: 'Float < (M)',
-      value: thresholds.float50,
-      step: '1',
-      min: 0.1,
-      allowZero: false,
-      formatter: (val) => fmt(val, 0),
-      validate: (value) => {
-        const pref = thresholds.float10;
-        if (Number.isFinite(pref) && value < pref) {
-          return `Debe ser ≥ pref (${fmt(pref, 0)})`;
-        }
-        return null;
-      },
-      onValid: (value) => setThresholds((prev) => ({ ...prev, float50: value })),
-    },
-    {
-      key: 'float10',
-      label: 'Pref. Float < (M)',
-      value: thresholds.float10,
-      step: '1',
-      min: 0.1,
-      allowZero: false,
-      formatter: (val) => fmt(val, 0),
-      max: thresholds.float50,
-      validate: (value) => {
-        const maxVal = thresholds.float50;
-        if (Number.isFinite(maxVal) && value > maxVal) {
-          return `Debe ser ≤ máx (${fmt(maxVal, 0)})`;
-        }
-        return null;
-      },
-      onValid: (value) => setThresholds((prev) => ({ ...prev, float10: value })),
-    },
-    {
-      key: 'rotationMin',
-      label: 'Rotación ≥',
-      value: thresholds.rotationMin,
-      step: '0.1',
-      min: 0.1,
-      allowZero: false,
-      formatter: (val) => fmt(val, 1),
-      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationMin: value })),
-    },
-    {
-      key: 'rotationIdeal',
-      label: 'Rotación ideal ≥',
-      value: thresholds.rotationIdeal,
-      step: '0.1',
-      min: thresholds.rotationMin || 0.1,
-      allowZero: false,
-      formatter: (val) => fmt(val, 1),
-      validate: (value) => {
-        const minVal = thresholds.rotationMin;
-        if (Number.isFinite(minVal) && value < minVal) {
-          return `Debe ser ≥ ${fmt(minVal, 1)}`;
-        }
-        return null;
-      },
-      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationIdeal: value })),
-    },
-  ];
 
   const exportCSV = useCallback(() => {
     const headers = [
@@ -1102,231 +919,7 @@ function App() {
           </div>
         </section>
 
-        <section className={`rounded-2xl ${COLORS.glass} p-6 shadow-xl`}>
-          <h2 className="text-xl font-semibold mb-4">Umbrales por mercado</h2>
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Mercados</h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
-                      <span className="font-medium">{info.label}</span>
-                      <input
-                        type="checkbox"
-                        aria-label={`Habilitar mercado ${info.label}`}
-                        checked={!!thresholds.marketsEnabled?.[key]}
-                        onChange={(e) => toggleMarket(key, e.target.checked)}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <div key={key} className="space-y-2 bg-white/5 rounded-xl p-3">
-                      {(() => {
-                        const priceRange = thresholds.priceRange?.[key] || {};
-                        const minKey = `price-${key}-min`;
-                        const maxKey = `price-${key}-max`;
-                        const minError = getError(minKey);
-                        const maxError = getError(maxKey);
-                        const formatNumber = (val) => fmt(val, 2);
-                        return (
-                          <>
-                            <div className="text-center text-white/70 text-xs uppercase tracking-wide">{info.label}</div>
-                            <label className="flex flex-col gap-1 text-xs">
-                              <span className="text-white/80">Mínimo</span>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.1"
-                                min="0"
-                                aria-label={`Precio mínimo ${info.label}`}
-                                value={priceRange.min ?? ''}
-                                onChange={(e) => {
-                                  const nextValue = parseNumberInput(e);
-                                  applyNumericUpdate(minKey, nextValue, (validValue) => updatePriceRange(key, 'min', validValue), {
-                                    min: 0,
-                                    allowEmpty: false,
-                                    formatter: formatNumber,
-                                    validate: (val) => {
-                                      const maxVal = thresholds.priceRange?.[key]?.max;
-                                      if (Number.isFinite(maxVal) && val > maxVal) {
-                                        return `Debe ser ≤ ${formatNumber(maxVal)}`;
-                                      }
-                                      return null;
-                                    },
-                                  });
-                                }}
-                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
-                              />
-                              {minError ? <span className="text-[10px] text-rose-300">{minError}</span> : null}
-                            </label>
-                            <label className="flex flex-col gap-1 text-xs">
-                              <span className="text-white/80">Máximo</span>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.1"
-                                min="0"
-                                aria-label={`Precio máximo ${info.label}`}
-                                value={priceRange.max ?? ''}
-                                onChange={(e) => {
-                                  const nextValue = parseNumberInput(e);
-                                  applyNumericUpdate(maxKey, nextValue, (validValue) => updatePriceRange(key, 'max', validValue), {
-                                    min: 0,
-                                    allowEmpty: false,
-                                    formatter: formatNumber,
-                                    validate: (val) => {
-                                      const minVal = thresholds.priceRange?.[key]?.min;
-                                      if (Number.isFinite(minVal) && val < minVal) {
-                                        return `Debe ser ≥ ${formatNumber(minVal)}`;
-                                      }
-                                      return null;
-                                    },
-                                  });
-                                }}
-                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
-                              />
-                              {maxError ? <span className="text-[10px] text-rose-300">{maxError}</span> : null}
-                            </label>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
-                  {volumeInputs.map((field) => {
-                    const error = getError(field.key);
-                    return (
-                      <label key={field.key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                        <span className="text-white/80 font-medium">{field.label}</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step={field.step}
-                          min={field.min ?? 0}
-                          aria-label={field.label}
-                          value={field.value ?? ''}
-                          onChange={(e) => {
-                            const nextValue = parseNumberInput(e);
-                            applyNumericUpdate(
-                              field.key,
-                              nextValue,
-                              (validValue) => field.onValid(validValue),
-                              {
-                                min: field.min ?? 0,
-                                max: field.max ?? Number.POSITIVE_INFINITY,
-                                allowEmpty: false,
-                                allowZero: field.allowZero ?? true,
-                                formatter: field.formatter || ((val) => fmt(val, 2)),
-                                validate: field.validate,
-                              },
-                            );
-                          }}
-                          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                        />
-                        {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
-                      {(() => {
-                        const errorKey = `liq-${key}`;
-                        const error = getError(errorKey);
-                        return (
-                          <>
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              step="0.5"
-                              min="0"
-                              aria-label={`Liquidez mínima ${info.label}`}
-                              value={thresholds.liquidityMin?.[key] ?? ''}
-                              onChange={(e) => {
-                                const nextValue = parseNumberInput(e);
-                                applyNumericUpdate(errorKey, nextValue, (validValue) => updateLiquidityMin(key, validValue), {
-                                  min: 0,
-                                  allowEmpty: false,
-                                  formatter: (val) => fmt(val, 1),
-                                });
-                              }}
-                              className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                            />
-                            {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
-                          </>
-                        );
-                      })()}
-                    </label>
-                  ))}
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                    <span className="text-white/80 font-medium">Spread ≤ %</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      inputMode="decimal"
-                      aria-label="Spread máximo permitido"
-                      value={thresholds.spreadMaxPct ?? ''}
-                      onChange={(e) => {
-                        const nextValue = parseNumberInput(e);
-                        applyNumericUpdate(
-                          'spreadMaxPct',
-                          nextValue,
-                          (validValue) => setThresholds((prev) => ({ ...prev, spreadMaxPct: validValue })),
-                          {
-                            min: 0,
-                            allowEmpty: false,
-                            formatter: (val) => fmt(val, 2),
-                          },
-                        );
-                      }}
-                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                    />
-                    {getError('spreadMaxPct') ? <span className="text-[10px] text-rose-300">{getError('spreadMaxPct')}</span> : null}
-                  </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input
-                      type="checkbox"
-                      aria-label="Requerir precio mayor a EMA200"
-                      checked={thresholds.needEMA200}
-                      onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))}
-                    />
-                    <span>Requerir precio &gt; EMA200</span>
-                  </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
-                    <input
-                      type="checkbox"
-                      aria-label="Activar modo parabólico"
-                      checked={thresholds.parabolic50}
-                      onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))}
-                    />
-                    <span>Modo parabólico (≥ 50%)</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <FiltersPanel filters={filterForm} />
 
         <section className="grid md:grid-cols-3 gap-4 mt-6">
           <ScoreDistributionCard

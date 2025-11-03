@@ -8,6 +8,7 @@ import {
 import {
   normalizeThresholds,
   areThresholdsEqual,
+  createThresholdSignature,
 } from '../utils/thresholds.js';
 import {
   loadThresholdState,
@@ -151,24 +152,7 @@ export function useThresholds() {
   }, []);
 
   const thresholdsKey = useMemo(
-    () => JSON.stringify({
-      marketsEnabled: state.thresholds.marketsEnabled,
-      priceRange: state.thresholds.priceRange,
-      liquidityMin: state.thresholds.liquidityMin,
-      rvolMin: state.thresholds.rvolMin,
-      rvolIdeal: state.thresholds.rvolIdeal,
-      atrMin: state.thresholds.atrMin,
-      atrPctMin: state.thresholds.atrPctMin,
-      chgMin: state.thresholds.chgMin,
-      parabolic50: state.thresholds.parabolic50,
-      needEMA200: state.thresholds.needEMA200,
-      float50: state.thresholds.float50,
-      float10: state.thresholds.float10,
-      rotationMin: state.thresholds.rotationMin,
-      rotationIdeal: state.thresholds.rotationIdeal,
-      shortMin: state.thresholds.shortMin,
-      spreadMaxPct: state.thresholds.spreadMaxPct,
-    }),
+    () => createThresholdSignature(state.thresholds),
     [state.thresholds],
   );
 
