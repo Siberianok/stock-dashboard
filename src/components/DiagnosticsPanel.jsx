@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useId } from 'react';
 import { COLORS } from '../utils/constants.js';
 import { safeNumber } from '../utils/format.js';
 
@@ -22,6 +22,9 @@ const formatSize = (bytes) => {
 };
 
 export const DiagnosticsPanel = ({ metrics = [], logs = [] }) => {
+  const sectionId = useId();
+  const metricsHeadingId = `${sectionId}-metrics`;
+  const logsHeadingId = `${sectionId}-logs`;
   const latestMetrics = useMemo(() => metrics.slice(-5).reverse(), [metrics]);
   const latestLogs = useMemo(() => logs.slice(-5).reverse(), [logs]);
 
@@ -30,12 +33,24 @@ export const DiagnosticsPanel = ({ metrics = [], logs = [] }) => {
   }
 
   return (
-    <section className={`rounded-2xl ${COLORS.glass} mt-6 p-4 shadow-xl`} aria-label="Diagnóstico de red">
-      <h3 className="text-sm font-semibold text-white/80 mb-3">Diagnóstico de consultas</h3>
+    <section
+      className={`rounded-2xl ${COLORS.glass} mt-6 p-4 shadow-xl`}
+      aria-labelledby={sectionId}
+      role="region"
+    >
+      <h3 id={sectionId} className="text-sm font-semibold text-white/80 mb-3">
+        Diagnóstico de consultas
+      </h3>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <h4 className="text-xs uppercase tracking-wide text-white/60 mb-2">Métricas recientes</h4>
-          <ul className="space-y-1.5 text-[11px] text-white/70">
+          <h4 id={metricsHeadingId} className="text-xs uppercase tracking-wide text-white/60 mb-2">
+            Métricas recientes
+          </h4>
+          <ul
+            aria-labelledby={metricsHeadingId}
+            className="space-y-1.5 text-[11px] text-white/70"
+            aria-live="polite"
+          >
             {latestMetrics.length ? (
               latestMetrics.map((metric) => (
                 <li key={metric.id} className="flex justify-between gap-2">
@@ -54,8 +69,14 @@ export const DiagnosticsPanel = ({ metrics = [], logs = [] }) => {
           </ul>
         </div>
         <div>
-          <h4 className="text-xs uppercase tracking-wide text-white/60 mb-2">Errores recientes</h4>
-          <ul className="space-y-1.5 text-[11px] text-white/70">
+          <h4 id={logsHeadingId} className="text-xs uppercase tracking-wide text-white/60 mb-2">
+            Errores recientes
+          </h4>
+          <ul
+            aria-labelledby={logsHeadingId}
+            className="space-y-1.5 text-[11px] text-white/70"
+            aria-live="assertive"
+          >
             {latestLogs.length ? (
               latestLogs.map((log) => (
                 <li key={log.id}>
