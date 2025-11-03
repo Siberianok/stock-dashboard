@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useId } from 'react';
 import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
@@ -10,13 +10,25 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
   const info = MARKETS[market] || MARKETS.US;
   const { rvol, atrPct, chgPct, rotation, score, flags } = calcResult;
   const stale = !!row.isStale;
+  const handleKeyDown = (event) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect(row.id);
+    }
+  };
+  const rowLabel = row.ticker ? `Fila ${row.ticker}` : 'Fila sin ticker';
 
   return (
     <tr
       className={`border-b border-white/10 text-xs ${isSelected ? 'bg-white/15' : 'bg-transparent'} hover:bg-white/10 transition ${
         stale ? 'opacity-80' : ''
-      }`}
+      } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-sky-300`}
       onClick={() => onSelect(row.id)}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      aria-selected={isSelected}
+      aria-label={`${rowLabel}${stale ? ' (datos en caché)' : ''}`}
     >
       <td className="px-3 py-2 w-32">
         <input
@@ -100,7 +112,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
       <td className="px-2 py-1.5 w-44">
         <div className="flex items-center gap-2">
           <span className="w-12 text-right font-semibold tabular-nums">{safeNumber(score, 0)}</span>
-          <div className="flex-1"><ScoreBar value={score || 0} /></div>
+          <div className="flex-1"><ScoreBar value={score || 0} label={`Score para ${row.ticker || 'fila'}`} /></div>
         </div>
       </td>
       <td className="px-3 py-2 align-top">
@@ -135,6 +147,9 @@ export const TickerTable = ({
 }) => {
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(() => rows.map((row) => ({ row, calcResult: calc(row, row.market || 'US') })), [rows, calc]);
+  const titleId = useId();
+  const statusId = useId();
+  const keyboardHelpId = useId();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
 
@@ -168,17 +183,19 @@ export const TickerTable = ({
     <div className={`rounded-2xl ${COLORS.glass} mt-6 shadow-2xl overflow-hidden`}>
       <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-white/10">
         <div>
-          <h3 className="font-semibold">Tickers</h3>
+          <h3 id={titleId} className="font-semibold">Tickers</h3>
           <div className="text-xs text-white/60 mt-0.5">
             Última actualización: {lastUpdatedLabel}
             {loading ? ' · actualizando' : ''}
           </div>
-          {stale ? (
-            <div className="text-xs text-amber-300 mt-1">
-              Datos en caché · {staleSeconds != null ? `${staleSeconds}s sin refrescar` : 'edad desconocida'}
-            </div>
-          ) : null}
-          {fetchError ? <div className="text-xs text-rose-300 mt-1">Error: {fetchError}</div> : null}
+          <div id={statusId} className="text-xs mt-1 space-y-1" role="status" aria-live="polite">
+            {stale ? (
+              <div className="text-amber-300">
+                Datos en caché · {staleSeconds != null ? `${staleSeconds}s sin refrescar` : 'edad desconocida'}
+              </div>
+            ) : null}
+            {fetchError ? <div className="text-rose-300">Error: {fetchError}</div> : null}
+          </div>
         </div>
         <div className="flex gap-2">
           <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition" onClick={onAddRow}>+ Agregar fila</button>
@@ -188,35 +205,43 @@ export const TickerTable = ({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-left">
+        <table
+          className="min-w-full text-left"
+          aria-labelledby={titleId}
+          aria-describedby={`${keyboardHelpId} ${statusId}`.trim()}
+        >
+          <caption id={keyboardHelpId} className="visualmente-oculto">
+            Usa las flechas o la tecla Tab para moverte por los campos. Con la fila enfocada presiona Enter o espacio para
+            seleccionarla.
+          </caption>
           <thead className="text-[11px] uppercase tracking-wide text-white/60 bg-white/5">
             <tr>
-              <th className="px-3 py-2">Ticker</th>
-              <th className="px-3 py-2">Mercado</th>
-              <th className="px-3 py-2">Open</th>
-              <th className="px-3 py-2">Close</th>
-              <th className="px-3 py-2">Bid</th>
-              <th className="px-3 py-2">Ask</th>
-              <th className="px-3 py-2">Promedio</th>
-              <th className="px-3 py-2">Vol hoy</th>
-              <th className="px-3 py-2">Vol prom 10</th>
-              <th className="px-3 py-2">RVOL</th>
-              <th className="px-3 py-2">Float (M)</th>
-              <th className="px-3 py-2">Rotación</th>
-              <th className="px-3 py-2">Short%</th>
-              <th className="px-3 py-2">DTC</th>
-              <th className="px-3 py-2">ATR14</th>
-              <th className="px-3 py-2">ATR%</th>
-              <th className="px-3 py-2">EMA9</th>
-              <th className="px-3 py-2">EMA200</th>
-              <th className="px-3 py-2">%día</th>
-              <th className="px-3 py-2">Catal</th>
-              <th className="px-3 py-2">Intra</th>
-              <th className="px-3 py-2">Spread%</th>
-              <th className="px-3 py-2">Liquidez</th>
-              <th className="px-3 py-2">Flags</th>
-              <th className="px-3 py-2">Score</th>
-              <th className="px-3 py-2">Notas</th>
+              <th className="px-3 py-2" scope="col">Ticker</th>
+              <th className="px-3 py-2" scope="col">Mercado</th>
+              <th className="px-3 py-2" scope="col">Open</th>
+              <th className="px-3 py-2" scope="col">Close</th>
+              <th className="px-3 py-2" scope="col">Bid</th>
+              <th className="px-3 py-2" scope="col">Ask</th>
+              <th className="px-3 py-2" scope="col">Promedio</th>
+              <th className="px-3 py-2" scope="col">Vol hoy</th>
+              <th className="px-3 py-2" scope="col">Vol prom 10</th>
+              <th className="px-3 py-2" scope="col">RVOL</th>
+              <th className="px-3 py-2" scope="col">Float (M)</th>
+              <th className="px-3 py-2" scope="col">Rotación</th>
+              <th className="px-3 py-2" scope="col">Short%</th>
+              <th className="px-3 py-2" scope="col">DTC</th>
+              <th className="px-3 py-2" scope="col">ATR14</th>
+              <th className="px-3 py-2" scope="col">ATR%</th>
+              <th className="px-3 py-2" scope="col">EMA9</th>
+              <th className="px-3 py-2" scope="col">EMA200</th>
+              <th className="px-3 py-2" scope="col">%día</th>
+              <th className="px-3 py-2" scope="col">Catal</th>
+              <th className="px-3 py-2" scope="col">Intra</th>
+              <th className="px-3 py-2" scope="col">Spread%</th>
+              <th className="px-3 py-2" scope="col">Liquidez</th>
+              <th className="px-3 py-2" scope="col">Flags</th>
+              <th className="px-3 py-2" scope="col">Score</th>
+              <th className="px-3 py-2" scope="col">Notas</th>
             </tr>
           </thead>
           <tbody>

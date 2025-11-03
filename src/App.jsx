@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef, memo, forwardRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef, memo, forwardRef, useId } from 'react';
 import {
   ResponsiveContainer,
   Tooltip,
@@ -18,8 +18,11 @@ import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
 import { createCalc } from './utils/calc.js';
 import { fetchQuotes, clearCache } from './services/yahooFinance.js';
+import { computeFilterPreview } from './services/filterPreview.js';
+import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
+import { useHistoricalBenchmarks } from './hooks/useHistoricalBenchmarks.js';
 import { useTheme } from './hooks/useTheme.js';
 import { useChartExport } from './hooks/useChartExport.js';
 import { TickerTable } from './components/TickerTable.jsx';
@@ -28,8 +31,7 @@ import { Badge } from './components/Badge.jsx';
 import { subscribeToMetrics } from './utils/metrics.js';
 import { subscribeToLogs, logError } from './utils/logger.js';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel.jsx';
-import { useFilterForm } from './store/filterStore.js';
-import { FiltersPanel } from './components/filters/FiltersPanel.jsx';
+import { PreviewDialog } from './components/PreviewDialog.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -107,12 +109,16 @@ const ScoreDistributionCard = memo(
     { data, total, averageScore, timeRange, onExport, theme },
     ref,
   ) {
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Distribución de SCORE</h3>
-            <p className="text-xs text-white/60">Promedio ponderado: {fmt(averageScore, 1)} · {TIME_RANGE_LABELS[timeRange]}</p>
+            <h3 id={headingId} className="font-semibold text-base">Distribución de SCORE</h3>
+            <p id={descriptionId} className="text-xs text-white/60">
+              Promedio ponderado: {fmt(averageScore, 1)} · {TIME_RANGE_LABELS[timeRange]}
+            </p>
           </div>
           <button
             type="button"
@@ -121,23 +127,26 @@ const ScoreDistributionCard = memo(
               filename: 'score-distribution.png',
               backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
             })}
+            aria-label="Exportar gráfico de distribución"
           >
             Exportar
           </button>
         </div>
-        <ResponsiveContainer height={220}>
-          <PieChart>
-            <Tooltip
-              content={<ScoreDistributionTooltip total={total} timeRange={timeRange} />}
-              wrapperStyle={{ outline: 'none' }}
-            />
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2}>
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={entry.color} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <PieChart>
+              <Tooltip
+                content={<ScoreDistributionTooltip total={total} timeRange={timeRange} />}
+                wrapperStyle={{ outline: 'none' }}
+              />
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2}>
+                {data.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
         <div className="mt-3 text-xs text-white/70 text-center">Tickers promedio activos: {Math.round(total || 0)}</div>
       </div>
     );
@@ -147,12 +156,14 @@ const ScoreDistributionCard = memo(
 const FlowSankeyCard = memo(
   forwardRef(function FlowSankeyCard({ data, onExport, theme, timeRange, accentColor }, ref) {
     const nodeStroke = theme === 'dark' ? '#1e293b' : '#cbd5f5';
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Embudo de confirmaciones</h3>
-            <p className="text-xs text-white/60">Pasos promedio · {TIME_RANGE_LABELS[timeRange]}</p>
+            <h3 id={headingId} className="font-semibold text-base">Embudo de confirmaciones</h3>
+            <p id={descriptionId} className="text-xs text-white/60">Pasos promedio · {TIME_RANGE_LABELS[timeRange]}</p>
           </div>
           <button
             type="button"
@@ -161,22 +172,25 @@ const FlowSankeyCard = memo(
               filename: 'flujo-confirmaciones.png',
               backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
             })}
+            aria-label="Exportar gráfico de embudo"
           >
             Exportar
           </button>
         </div>
-        <ResponsiveContainer height={220}>
-          <Sankey
-            data={data}
-            nodePadding={24}
-            nodeWidth={18}
-            margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
-            link={{ stroke: accentColor, strokeWidth: 1.2 }}
-            node={{ stroke: nodeStroke, fill: accentColor }}
-          >
-            <Tooltip content={<SankeyTooltip timeRange={timeRange} />} wrapperStyle={{ outline: 'none' }} />
-          </Sankey>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <Sankey
+              data={data}
+              nodePadding={24}
+              nodeWidth={18}
+              margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
+              link={{ stroke: accentColor, strokeWidth: 1.2 }}
+              node={{ stroke: nodeStroke, fill: accentColor }}
+            >
+              <Tooltip content={<SankeyTooltip timeRange={timeRange} />} wrapperStyle={{ outline: 'none' }} />
+            </Sankey>
+          </ResponsiveContainer>
+        </div>
       </div>
     );
   }),
@@ -203,35 +217,55 @@ const RadarTooltip = ({ active, payload }) => {
 };
 
 const PerformanceRadarCard = memo(
-  forwardRef(function PerformanceRadarCard({ data, selectedRow, onExport, theme, accentColor }, ref) {
+  forwardRef(function PerformanceRadarCard(
+    { data, selectedRow, onExport, theme, accentColor, onOpenPreview, previewDialogId },
+    ref,
+  ) {
     const label = selectedRow?.ticker ? `${selectedRow.ticker} · ${selectedRow.market || ''}` : 'Sin selección';
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Perfil del ticker</h3>
-            <p className="text-xs text-white/60">{label}</p>
+            <h3 id={headingId} className="font-semibold text-base">Perfil del ticker</h3>
+            <p id={descriptionId} className="text-xs text-white/60">{label}</p>
           </div>
-          <button
-            type="button"
-            className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
-            onClick={() => onExport(ref?.current, {
-              filename: 'perfil-ticker.png',
-              backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
-            })}
-          >
-            Exportar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => onOpenPreview?.()}
+              disabled={!selectedRow}
+              aria-haspopup="dialog"
+              aria-controls={previewDialogId || undefined}
+            >
+              Abrir previsualización
+            </button>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+              onClick={() => onExport(ref?.current, {
+                filename: 'perfil-ticker.png',
+                backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
+              })}
+              aria-label="Exportar gráfico de radar"
+            >
+              Exportar
+            </button>
+          </div>
         </div>
-        <ResponsiveContainer height={220}>
-          <RadarChart data={data} outerRadius={80}>
-            <PolarGrid />
-            <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
-            <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
-            <Radar dataKey="v" stroke={accentColor} fill={accentColor} fillOpacity={0.3} />
-            <Tooltip content={<RadarTooltip />} wrapperStyle={{ outline: 'none' }} />
-          </RadarChart>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <RadarChart data={data} outerRadius={80}>
+              <PolarGrid />
+              <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
+              <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
+              <Radar dataKey="v" stroke={accentColor} fill={accentColor} fillOpacity={0.3} />
+              <Tooltip content={<RadarTooltip />} wrapperStyle={{ outline: 'none' }} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
         <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para actualizar el radar.</div>
       </div>
     );
@@ -332,27 +366,121 @@ function App() {
   const filterForm = useFilterForm();
   const {
     thresholds,
+    activeThresholds,
     history: thresholdsHistory,
-    thresholdsKey,
+    thresholdsKey: activeThresholdsKey,
+    updatePriceRange,
+    updateLiquidityMin,
+    toggleMarket,
     presetModerado,
     presetAgresivo,
     undo: undoThresholds,
     pushSnapshot,
-  } = filterForm;
+    saveDraft,
+    applyDraft,
+    discardDraft,
+    hasDraftChanges,
+    hasUnsavedDraftChanges,
+    draftMeta,
+  } = useThresholds();
   const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
+  const activeCalc = useMemo(() => createCalc(activeThresholds), [activeThresholds]);
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
+  const [validationErrors, setValidationErrors] = useState({});
+  const [draftNotice, setDraftNotice] = useState(null);
+  const setFieldError = useCallback((key, message) => {
+    setValidationErrors((prev) => {
+      if (message) {
+        if (prev[key] === message) {
+          return prev;
+        }
+        return { ...prev, [key]: message };
+      }
+      if (!(key in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const applyNumericUpdate = useCallback((key, value, onValid, options = {}) => {
+    const { error, value: nextValue } = validateNumericValue(value, options);
+    if (error) {
+      setFieldError(key, error);
+      return;
+    }
+
+    setFieldError(key, null);
+    onValid(nextValue);
+  }, [setFieldError]);
+
+  const getError = useCallback((key) => validationErrors[key] || null, [validationErrors]);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const hasValidationErrors = useMemo(() => Object.keys(validationErrors).length > 0, [validationErrors]);
+  const previewDisabled = hasValidationErrors;
+  const previewHelperMessage = hasValidationErrors
+    ? 'Corregí los campos con error para habilitar la vista previa.'
+    : !hasDraftChanges
+      ? 'No hay diferencias entre el borrador y los umbrales aplicados.'
+      : null;
   const [selectedId, setSelectedId] = useState(() => {
     if (!isBrowser) return null;
     const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
     return stored || null;
   });
+  const handleSaveDraft = useCallback(() => {
+    const savedAt = saveDraft();
+    setDraftNotice({ type: 'saved', timestamp: savedAt });
+  }, [saveDraft]);
+  const handleApplyDraft = useCallback(() => {
+    const { applied, appliedAt } = applyDraft({ label: 'Aplicar borrador' });
+    setDraftNotice({ type: applied ? 'applied' : 'noop', timestamp: appliedAt });
+  }, [applyDraft]);
+  const handleDiscardDraft = useCallback(() => {
+    const discardedAt = discardDraft();
+    setDraftNotice({ type: 'discarded', timestamp: discardedAt });
+  }, [discardDraft]);
+  const draftStatusLabel = useMemo(() => {
+    if (!draftNotice) return null;
+    const { type, timestamp } = draftNotice;
+    const parsed = timestamp ? new Date(timestamp) : null;
+    const timeLabel = parsed && !Number.isNaN(parsed.getTime())
+      ? parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : null;
+    switch (type) {
+      case 'saved':
+        return `Borrador guardado${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'applied':
+        return `Borrador aplicado${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'discarded':
+        return `Cambios descartados${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'noop':
+        return 'No hay cambios para aplicar.';
+      default:
+        return null;
+    }
+  }, [draftNotice]);
+  const draftSavedAtLabel = useMemo(() => {
+    if (!draftMeta?.savedAt) return 'Nunca';
+    const parsed = new Date(draftMeta.savedAt);
+    if (Number.isNaN(parsed.getTime())) return 'Desconocido';
+    return parsed.toLocaleString();
+  }, [draftMeta?.savedAt]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [dataMode, setDataMode] = useState('live');
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
   const modeInitRef = useRef(true);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const previewDialogId = useId();
+  const marketsLegendId = useId();
+  const priceLegendId = useId();
+  const volumeLegendId = useId();
+  const technicalLegendId = useId();
 
   useEffect(() => {
     if (!rows.length) return;
@@ -374,6 +502,12 @@ function App() {
       }
     } catch (error) {
       logError('rows.selection.save', error);
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setPreviewOpen(false);
     }
   }, [selectedId]);
 
@@ -504,16 +638,16 @@ function App() {
       rows.map((row) => ({
         row,
         computed: calc(row, row.market || 'US'),
-        isActive: thresholds.marketsEnabled?.[row.market || 'US'] !== false,
+        isActive: appliedThresholds.marketsEnabled?.[row.market || 'US'] !== false,
       })),
-    [rows, calc, thresholds.marketsEnabled],
+    [rows, calc, appliedThresholds.marketsEnabled],
   );
 
   const activeComputed = useMemo(() => computedRows.filter((entry) => entry.isActive), [computedRows]);
 
   const visibleRows = useMemo(
-    () => rows.filter((row) => thresholds.marketsEnabled?.[row.market || 'US'] !== false),
-    [rows, thresholds.marketsEnabled],
+    () => rows.filter((row) => appliedThresholds.marketsEnabled?.[row.market || 'US'] !== false),
+    [rows, appliedThresholds.marketsEnabled],
   );
 
   const { theme, toggleTheme, palette } = useTheme();
@@ -538,9 +672,14 @@ function App() {
     clearHistory,
   } = dashboardMetrics;
 
+  const historicalBenchmarks = useHistoricalBenchmarks({ thresholds, timeRange });
+  const { benchmark: historicalBenchmark, loading: historicalLoading, error: historicalError } = historicalBenchmarks;
+  const historicalCurrentMetrics = useMemo(() => ({ averageScore, kpis }), [averageScore, kpis]);
+
   const scoreChartRef = useRef(null);
   const sankeyChartRef = useRef(null);
   const radarChartRef = useRef(null);
+  const historicalCardRef = useRef(null);
 
   const selectedRow = useMemo(() => {
     const found = rows.find((row) => row.id === selectedId);
@@ -556,11 +695,11 @@ function App() {
       if (val === undefined || thr === 0 || thr === undefined) return 0;
       return Math.max(0, Math.min(100, (val / thr) * 100));
     };
-    const rvolScore = scale(r.rvol, thresholds.rvolIdeal);
-    const chgScore = scale(r.chgPct, thresholds.parabolic50 ? 50 : thresholds.chgMin);
-    const atrScore = scale(r.atrPct, thresholds.atrPctMin * 2);
-    const rotScore = scale(r.rotation, thresholds.rotationIdeal);
-    const shortScore = scale(toNum(selectedRow?.shortPct), thresholds.shortMin);
+    const rvolScore = scale(r.rvol, appliedThresholds.rvolIdeal);
+    const chgScore = scale(r.chgPct, appliedThresholds.parabolic50 ? 50 : appliedThresholds.chgMin);
+    const atrScore = scale(r.atrPct, appliedThresholds.atrPctMin * 2);
+    const rotScore = scale(r.rotation, appliedThresholds.rotationIdeal);
+    const shortScore = scale(toNum(selectedRow?.shortPct), appliedThresholds.shortMin);
     const scoreScore = Math.max(0, Math.min(100, r.score || 0));
     return [
       { k: 'RVOL', v: rvolScore, raw: r.rvol },
@@ -570,19 +709,19 @@ function App() {
       { k: 'Short%', v: shortScore, raw: toNum(selectedRow?.shortPct) },
       { k: 'SCORE', v: scoreScore, raw: r.score },
     ];
-  }, [selectedCalc, selectedRow, thresholds]);
+  }, [selectedCalc, selectedRow, appliedThresholds]);
 
   const { state: scannerState, triggerScan } = useScanner({
-    thresholds,
-    calc,
-    thresholdsKey,
+    thresholds: activeThresholds,
+    calc: activeCalc,
+    thresholdsKey: activeThresholdsKey,
     mode: dataMode,
     coverageThreshold: 0.8,
   });
   const scannerMatchesRaw = scannerState.matches || [];
   const scannerLoading = !!scannerState.loading;
   const scannerError = scannerState.error;
-  const scannerResultsStale = !!(scannerState.lastThresholdsKey && scannerState.lastThresholdsKey !== thresholdsKey);
+  const scannerResultsStale = !!(scannerState.lastThresholdsKey && scannerState.lastThresholdsKey !== activeThresholdsKey);
   const scannerMatches = scannerResultsStale ? [] : scannerMatchesRaw;
 
   const applyMatchesToTable = useCallback(() => {
@@ -593,7 +732,32 @@ function App() {
     setRows(next);
     setSelectedId(next[0]?.id || null);
     setRefreshToken(Date.now());
+    setPreviewOpen(false);
   }, [scannerMatches, scannerState.lastUpdated, setRows]);
+
+  useEffect(() => {
+    const handleKeydown = (event) => {
+      if (event.defaultPrevented) return;
+      if (event.ctrlKey && !event.shiftKey && event.key === 'Enter') {
+        if (!scannerLoading && scannerMatches.length) {
+          event.preventDefault();
+          applyMatchesToTable();
+        }
+      }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        handleClearRows();
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'p') {
+        if (selectedRow) {
+          event.preventDefault();
+          setPreviewOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [applyMatchesToTable, scannerLoading, scannerMatches.length, handleClearRows, selectedRow]);
 
   const scannerUpdatedLabel = useMemo(() => {
     if (!scannerState.lastUpdated) return 'Sin datos';
@@ -615,9 +779,153 @@ function App() {
     setDataMode((prev) => (prev === 'live' ? 'mock' : 'live'));
   }, []);
 
+  const openPreview = useCallback(async () => {
+    if (previewDisabled) {
+      return;
+    }
+    setPreviewOpen(true);
+    startPreview();
+    try {
+      const result = await Promise.resolve(
+        computeFilterPreview({
+          appliedThresholds,
+          draftThresholds,
+        }),
+      );
+      completePreview(result);
+    } catch (error) {
+      logError('thresholds.preview', error);
+      failPreview(error?.message || 'No se pudo calcular la vista previa');
+    }
+  }, [previewDisabled, startPreview, appliedThresholds, draftThresholds, completePreview, failPreview]);
+
+  const closePreview = useCallback(() => {
+    setPreviewOpen(false);
+    clearPreview();
+  }, [clearPreview]);
+
+  const handleApplyPreview = useCallback(() => {
+    applyDraft({ label: 'Vista previa' });
+    closePreview();
+  }, [applyDraft, closePreview]);
+
+  const handleCancelPreview = useCallback(() => {
+    resetDraft();
+    setValidationErrors({});
+    closePreview();
+  }, [resetDraft, closePreview, setValidationErrors]);
+
   const sortByScore = useCallback(() => {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
   }, [calc, setRows]);
+
+  const handleClearRows = useCallback(() => {
+    clearRows();
+    setSelectedId(null);
+    setPreviewOpen(false);
+  }, [clearRows]);
+
+  const handleOpenPreview = useCallback(() => {
+    if (selectedRow) {
+      setPreviewOpen(true);
+    }
+  }, [selectedRow]);
+
+  const handleClosePreview = useCallback(() => {
+    setPreviewOpen(false);
+  }, []);
+
+  const volumeInputs = [
+    {
+      key: 'rvolMin',
+      label: 'RVOL ≥',
+      value: draftThresholds.rvolMin,
+      step: '0.1',
+      min: 0,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolMin: value })),
+    },
+    {
+      key: 'rvolIdeal',
+      label: 'RVOL ideal ≥',
+      value: draftThresholds.rvolIdeal,
+      step: '0.1',
+      min: draftThresholds.rvolMin || 0,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      validate: (value) => {
+        const minVal = draftThresholds.rvolMin;
+        if (Number.isFinite(minVal) && value < minVal) {
+          return `Debe ser ≥ ${fmt(minVal, 1)}`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rvolIdeal: value })),
+    },
+    {
+      key: 'float50',
+      label: 'Float < (M)',
+      value: draftThresholds.float50,
+      step: '1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 0),
+      validate: (value) => {
+        const pref = draftThresholds.float10;
+        if (Number.isFinite(pref) && value < pref) {
+          return `Debe ser ≥ pref (${fmt(pref, 0)})`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, float50: value })),
+    },
+    {
+      key: 'float10',
+      label: 'Pref. Float < (M)',
+      value: draftThresholds.float10,
+      step: '1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 0),
+      max: draftThresholds.float50,
+      validate: (value) => {
+        const maxVal = draftThresholds.float50;
+        if (Number.isFinite(maxVal) && value > maxVal) {
+          return `Debe ser ≤ máx (${fmt(maxVal, 0)})`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, float10: value })),
+    },
+    {
+      key: 'rotationMin',
+      label: 'Rotación ≥',
+      value: draftThresholds.rotationMin,
+      step: '0.1',
+      min: 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationMin: value })),
+    },
+    {
+      key: 'rotationIdeal',
+      label: 'Rotación ideal ≥',
+      value: draftThresholds.rotationIdeal,
+      step: '0.1',
+      min: draftThresholds.rotationMin || 0.1,
+      allowZero: false,
+      formatter: (val) => fmt(val, 1),
+      validate: (value) => {
+        const minVal = draftThresholds.rotationMin;
+        if (Number.isFinite(minVal) && value < minVal) {
+          return `Debe ser ≥ ${fmt(minVal, 1)}`;
+        }
+        return null;
+      },
+      onValid: (value) => setThresholds((prev) => ({ ...prev, rotationIdeal: value })),
+    },
+  ];
 
   const exportCSV = useCallback(() => {
     const headers = [
@@ -834,8 +1142,9 @@ function App() {
   }, [setRows]);
 
   return (
-    <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+    <>
+      <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
+        <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Selector de acciones parabólicas</h1>
@@ -877,6 +1186,37 @@ function App() {
                 <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
               )}
             </div>
+            <div className="pt-3 border-t border-white/10 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-white/60">Borradores de filtros</div>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleSaveDraft}
+                disabled={!hasUnsavedDraftChanges}
+              >
+                Guardar borrador
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleApplyDraft}
+                disabled={!hasDraftChanges}
+              >
+                Aplicar borrador
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleDiscardDraft}
+                disabled={!hasDraftChanges && !hasUnsavedDraftChanges}
+              >
+                Descartar cambios
+              </button>
+              <div className="text-[11px] text-white/60 leading-snug space-y-1">
+                <p>{hasDraftChanges ? 'El borrador es diferente a los filtros activos.' : 'El borrador coincide con los filtros activos.'}</p>
+                <p className={hasUnsavedDraftChanges ? 'text-amber-300' : ''}>
+                  {hasUnsavedDraftChanges ? 'Cambios pendientes de guardar.' : `Último guardado: ${draftSavedAtLabel}`}
+                </p>
+                {draftStatusLabel ? <p className="text-white/70">{draftStatusLabel}</p> : null}
+              </div>
+            </div>
           </div>
         </header>
 
@@ -891,6 +1231,7 @@ function App() {
                   type="button"
                   onClick={() => setTimeRange(option.key)}
                   className={`px-2.5 py-1 rounded-full border ${timeRange === option.key ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10'} transition`}
+                  aria-pressed={timeRange === option.key}
                 >
                   {option.label}
                 </button>
@@ -919,9 +1260,315 @@ function App() {
           </div>
         </section>
 
-        <FiltersPanel filters={filterForm} />
+        <section className={`rounded-2xl ${COLORS.glass} p-6 shadow-xl`}>
+          <h2 className="text-xl font-semibold mb-4">Umbrales por mercado</h2>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-5 text-sm">
+            <div>
+              <div className="font-medium text-white/90">
+                {hasDraftChanges ? 'Borrador con cambios sin aplicar' : 'Borrador sincronizado con los umbrales aplicados'}
+              </div>
+              {previewHelperMessage ? (
+                <div className={`text-xs ${hasValidationErrors ? 'text-rose-300' : 'text-white/60'}`}>
+                  {previewHelperMessage}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => {
+                  resetDraft();
+                  setValidationErrors({});
+                }}
+                disabled={!hasDraftChanges}
+              >
+                Descartar cambios
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-xl bg-sky-500/90 text-white hover:bg-sky-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={openPreview}
+                disabled={previewDisabled}
+              >
+                Vista previa
+              </button>
+            </div>
+          </div>
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={marketsLegendId}>
+                <legend
+                  id={marketsLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Mercados
+                </legend>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {Object.entries(MARKETS).map(([key, info]) => (
+                    <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
+                      <span className="font-medium">{info.label}</span>
+                      <input
+                        type="checkbox"
+                        aria-label={`Habilitar mercado ${info.label}`}
+                        checked={!!draftThresholds.marketsEnabled?.[key]}
+                        onChange={(e) => toggleMarket(key, e.target.checked)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
 
-        <section className="grid md:grid-cols-3 gap-4 mt-6">
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={priceLegendId}>
+                <legend
+                  id={priceLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Precio
+                </legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  {Object.entries(MARKETS).map(([key, info]) => {
+                    const priceRange = thresholds.priceRange?.[key] || {};
+                    const minKey = `price-${key}-min`;
+                    const maxKey = `price-${key}-max`;
+                    const minError = getError(minKey);
+                    const maxError = getError(maxKey);
+                    const formatNumber = (val) => fmt(val, 2);
+                    const groupLabelId = `price-${key}-label`;
+                    const minInputId = `${minKey}-input`;
+                    const maxInputId = `${maxKey}-input`;
+                    return (
+                      <div
+                        key={key}
+                        className="space-y-2 bg-white/5 rounded-xl p-3"
+                        role="group"
+                        aria-labelledby={groupLabelId}
+                      >
+                        <div id={groupLabelId} className="text-center text-white/70 text-xs uppercase tracking-wide">
+                          {info.label}
+                        </div>
+                        <label className="flex flex-col gap-1 text-xs" htmlFor={minInputId}>
+                          <span className="text-white/80">Mínimo</span>
+                          <input
+                            id={minInputId}
+                            type="number"
+                            inputMode="decimal"
+                            step="0.1"
+                            min="0"
+                            value={priceRange.min ?? ''}
+                            aria-describedby={minError ? `${minInputId}-error` : undefined}
+                            onChange={(e) => {
+                              const nextValue = parseNumberInput(e);
+                              applyNumericUpdate(minKey, nextValue, (validValue) => updatePriceRange(key, 'min', validValue), {
+                                min: 0,
+                                allowEmpty: false,
+                                formatter: formatNumber,
+                                validate: (val) => {
+                                  const maxVal = thresholds.priceRange?.[key]?.max;
+                                  if (Number.isFinite(maxVal) && val > maxVal) {
+                                    return `Debe ser ≤ ${formatNumber(maxVal)}`;
+                                  }
+                                  return null;
+                                },
+                              });
+                            }}
+                            className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                          />
+                          {minError ? (
+                            <span id={`${minInputId}-error`} className="text-[10px] text-rose-300">
+                              {minError}
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs" htmlFor={maxInputId}>
+                          <span className="text-white/80">Máximo</span>
+                          <input
+                            id={maxInputId}
+                            type="number"
+                            inputMode="decimal"
+                            step="0.1"
+                            min="0"
+                            value={priceRange.max ?? ''}
+                            aria-describedby={maxError ? `${maxInputId}-error` : undefined}
+                            onChange={(e) => {
+                              const nextValue = parseNumberInput(e);
+                              applyNumericUpdate(maxKey, nextValue, (validValue) => updatePriceRange(key, 'max', validValue), {
+                                min: 0,
+                                allowEmpty: false,
+                                formatter: formatNumber,
+                                validate: (val) => {
+                                  const minVal = thresholds.priceRange?.[key]?.min;
+                                  if (Number.isFinite(minVal) && val < minVal) {
+                                    return `Debe ser ≥ ${formatNumber(minVal)}`;
+                                  }
+                                  return null;
+                                },
+                              });
+                            }}
+                            className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                          />
+                          {maxError ? (
+                            <span id={`${maxInputId}-error`} className="text-[10px] text-rose-300">
+                              {maxError}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </div>
+
+            <div className="space-y-4">
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={volumeLegendId}>
+                <legend
+                  id={volumeLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Volumen & Float
+                </legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
+                  {volumeInputs.map((field) => {
+                    const error = getError(field.key);
+                    const inputId = `${field.key}-input`;
+                    return (
+                      <label key={field.key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor={inputId}>
+                        <span className="text-white/80 font-medium">{field.label}</span>
+                        <input
+                          id={inputId}
+                          type="number"
+                          inputMode="decimal"
+                          step={field.step}
+                          min={field.min ?? 0}
+                          value={field.value ?? ''}
+                          aria-describedby={error ? `${inputId}-error` : undefined}
+                          onChange={(e) => {
+                            const nextValue = parseNumberInput(e);
+                            applyNumericUpdate(
+                              field.key,
+                              nextValue,
+                              (validValue) => field.onValid(validValue),
+                              {
+                                min: field.min ?? 0,
+                                max: field.max ?? Number.POSITIVE_INFINITY,
+                                allowEmpty: false,
+                                allowZero: field.allowZero ?? true,
+                                formatter: field.formatter || ((val) => fmt(val, 2)),
+                                validate: field.validate,
+                              },
+                            );
+                          }}
+                          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                        />
+                        {error ? (
+                          <span id={`${inputId}-error`} className="text-[10px] text-rose-300">
+                            {error}
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={technicalLegendId}>
+                <legend
+                  id={technicalLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Técnico & Micro
+                </legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
+                  {Object.entries(MARKETS).map(([key, info]) => {
+                    const errorKey = `liq-${key}`;
+                    const error = getError(errorKey);
+                    const inputId = `${errorKey}-input`;
+                    return (
+                      <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor={inputId}>
+                        <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
+                        <input
+                          id={inputId}
+                          type="number"
+                          inputMode="decimal"
+                          step="0.5"
+                          min="0"
+                          value={thresholds.liquidityMin?.[key] ?? ''}
+                          aria-describedby={error ? `${inputId}-error` : undefined}
+                          onChange={(e) => {
+                            const nextValue = parseNumberInput(e);
+                            applyNumericUpdate(errorKey, nextValue, (validValue) => updateLiquidityMin(key, validValue), {
+                              min: 0,
+                              allowEmpty: false,
+                              formatter: (val) => fmt(val, 1),
+                            });
+                          }}
+                          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                        />
+                        {error ? (
+                          <span id={`${inputId}-error`} className="text-[10px] text-rose-300">
+                            {error}
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor="spread-max-input">
+                    <span className="text-white/80 font-medium">Spread ≤ %</span>
+                    <input
+                      id="spread-max-input"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      inputMode="decimal"
+                      value={thresholds.spreadMaxPct ?? ''}
+                      aria-describedby={getError('spreadMaxPct') ? 'spread-max-error' : undefined}
+                      onChange={(e) => {
+                        const nextValue = parseNumberInput(e);
+                        applyNumericUpdate(
+                          'spreadMaxPct',
+                          nextValue,
+                          (validValue) => setThresholds((prev) => ({ ...prev, spreadMaxPct: validValue })),
+                          {
+                            min: 0,
+                            allowEmpty: false,
+                            formatter: (val) => fmt(val, 2),
+                          },
+                        );
+                      }}
+                      className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                    />
+                    {getError('spreadMaxPct') ? (
+                      <span id="spread-max-error" className="text-[10px] text-rose-300">
+                        {getError('spreadMaxPct')}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1" htmlFor="need-ema-200">
+                    <input
+                      id="need-ema-200"
+                      type="checkbox"
+                      checked={thresholds.needEMA200}
+                      onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))}
+                    />
+                    <span id="need-ema-200-label">Requerir precio &gt; EMA200</span>
+                  </label>
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1" htmlFor="mode-parabolic">
+                    <input
+                      id="mode-parabolic"
+                      type="checkbox"
+                      checked={thresholds.parabolic50}
+                      onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))}
+                    />
+                    <span id="mode-parabolic-label">Modo parabólico (≥ 50%)</span>
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 mt-6 md:grid-cols-2 lg:grid-cols-4">
           <ScoreDistributionCard
             ref={scoreChartRef}
             data={scoreDistribution}
@@ -946,6 +1593,19 @@ function App() {
             onExport={exportChart}
             theme={theme}
             accentColor={palette.chart.accent}
+            onOpenPreview={handleOpenPreview}
+            previewDialogId={previewDialogId}
+          />
+          <HistoricalComparisonCard
+            ref={historicalCardRef}
+            benchmark={historicalBenchmark}
+            current={historicalCurrentMetrics}
+            timeRangeLabel={TIME_RANGE_LABELS[timeRange] || ''}
+            loading={historicalLoading}
+            error={historicalError}
+            onExport={exportChart}
+            theme={theme}
+            palette={palette.chart}
           />
         </section>
 
@@ -983,6 +1643,9 @@ function App() {
                 </button>
                 <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading} type="button">Escanear ahora</button>
                 <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length} type="button">Cargar en tabla</button>
+                <div className="basis-full text-right text-[11px] text-white/60">
+                  Atajos: Ctrl+Enter aplica coincidencias, Ctrl+Shift+D limpia la tabla, Ctrl+P abre la previsualización.
+                </div>
               </div>
             </div>
           </div>
@@ -1007,7 +1670,7 @@ function App() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
-                      <div className="flex-1"><ScoreBar value={computed.score || 0} /></div>
+                      <div className="flex-1"><ScoreBar value={computed.score || 0} label={`Score ${data.ticker}`} /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs text-white/70">
                       <div>
@@ -1067,15 +1730,12 @@ function App() {
 
         <TickerTable
           rows={visibleRows}
-          thresholds={thresholds}
+          thresholds={appliedThresholds}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onUpdate={updateRow}
           onAddRow={addRow}
-          onClearRows={() => {
-            clearRows();
-            setSelectedId(null);
-          }}
+          onClearRows={handleClearRows}
           onSortByScore={sortByScore}
           onExport={exportCSV}
           lastUpdatedLabel={lastUpdatedLabel}
@@ -1084,6 +1744,172 @@ function App() {
           stale={staleInfo.isStale}
           staleSeconds={staleInfo.ageSeconds}
         />
+
+        {isPreviewOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={closePreview} />
+            <div
+              className="relative z-10 w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-900/95 p-6 shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="preview-title"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 id="preview-title" className="text-xl font-semibold text-white">Vista previa de filtros</h3>
+                  <p className="text-sm text-white/60 mt-1">Compará el borrador contra la versión aplicada sin persistir cambios.</p>
+                  {previewEvaluatedAt ? (
+                    <p className="text-xs text-white/50 mt-2">Generada {new Date(previewEvaluatedAt).toLocaleString()}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="text-white/60 hover:text-white"
+                  onClick={closePreview}
+                  aria-label="Cerrar vista previa"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-5 space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {previewLoading ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-sm text-white/70">
+                    Calculando vista previa...
+                  </div>
+                ) : previewError ? (
+                  <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+                    No se pudo generar la vista previa: {previewError}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl bg-white/5 p-4">
+                        <div className="text-xs uppercase tracking-wide text-white/60">Tickers evaluados</div>
+                        <div className="text-2xl font-semibold text-white">{previewSummary.total}</div>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-500/10 p-4">
+                        <div className="text-xs uppercase tracking-wide text-emerald-200/80">Aprueban con borrador</div>
+                        <div className="text-2xl font-semibold text-emerald-200">{previewSummary.draftPass}</div>
+                        <div className="text-[11px] text-emerald-100/80">Aplicado: {previewSummary.appliedPass}</div>
+                      </div>
+                      <div className="rounded-2xl bg-cyan-500/10 p-4">
+                        <div className="text-xs uppercase tracking-wide text-cyan-100/80">Cambios relevantes</div>
+                        <div className="text-2xl font-semibold text-cyan-100">
+                          {previewEntries.filter((entry) => entry.status !== 'unchanged' && entry.status !== 'stillFailing').length}
+                        </div>
+                        <div className="text-[11px] text-cyan-100/70">Nuevos: {previewSummary.added} · Salen: {previewSummary.removed}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/50">
+                      Permanecen fuera del filtro: {previewSummary.stillFailing}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4">
+                        <h4 className="mb-2 text-sm font-semibold text-emerald-100">Ingresan ({previewGroups.added.length})</h4>
+                        {previewGroups.added.length ? (
+                          <ul className="space-y-2 text-xs text-emerald-100/80">
+                            {previewGroups.added.map((entry) => (
+                              <li key={`add-${entry.ticker}`} className="rounded-lg border border-emerald-400/30 bg-emerald-500/15 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <div className="font-semibold uppercase tracking-wide text-emerald-100">{entry.ticker}</div>
+                                    <div className="text-[11px] text-emerald-200/80">{entry.market}</div>
+                                  </div>
+                                  <div className="text-sm font-semibold text-emerald-100">SCORE {formatScore(entry.draft.score)}</div>
+                                </div>
+                                {entry.flagChanges.gained.length ? (
+                                  <div className="mt-2 text-[11px] text-emerald-200">
+                                    Flags nuevas: {entry.flagChanges.gained.join(', ')}
+                                  </div>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-emerald-100/70">Sin ingresos nuevos.</p>
+                        )}
+                      </div>
+                      <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4">
+                        <h4 className="mb-2 text-sm font-semibold text-rose-200">Salen ({previewGroups.removed.length})</h4>
+                        {previewGroups.removed.length ? (
+                          <ul className="space-y-2 text-xs text-rose-100/80">
+                            {previewGroups.removed.map((entry) => (
+                              <li key={`removed-${entry.ticker}`} className="rounded-lg border border-rose-400/30 bg-rose-500/15 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <div className="font-semibold uppercase tracking-wide text-rose-200">{entry.ticker}</div>
+                                    <div className="text-[11px] text-rose-200/70">{entry.market}</div>
+                                  </div>
+                                  <div className="text-sm font-semibold text-rose-200">SCORE {formatScore(entry.applied.score)}</div>
+                                </div>
+                                {entry.flagChanges.lost.length ? (
+                                  <div className="mt-2 text-[11px] text-rose-200">
+                                    Pierde: {entry.flagChanges.lost.join(', ')}
+                                  </div>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-rose-100/70">No se eliminan candidatos actuales.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <h4 className="mb-2 text-sm font-semibold text-white">Variaciones de SCORE ({previewGroups.improved.length + previewGroups.regressed.length})</h4>
+                      {previewGroups.improved.length || previewGroups.regressed.length ? (
+                        <ul className="space-y-2 text-xs text-white/80">
+                          {[...previewGroups.improved, ...previewGroups.regressed].map((entry) => (
+                            <li key={`delta-${entry.ticker}`} className="flex items-center justify-between gap-2 rounded-lg bg-white/10 px-3 py-2">
+                              <div>
+                                <div className="font-semibold text-white">{entry.ticker}</div>
+                                <div className="text-[11px] text-white/60">
+                                  {formatScore(entry.applied.score)} → {formatScore(entry.draft.score)}
+                                </div>
+                              </div>
+                              <span className={`text-sm font-semibold ${entry.scoreDelta >= 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                                {formatScoreDelta(entry.scoreDelta)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-white/60">Sin variaciones relevantes en SCORE.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition text-sm"
+                  onClick={closePreview}
+                >
+                  Cerrar
+                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleCancelPreview}
+                    disabled={previewLoading}
+                  >
+                    Descartar borrador
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/90 text-white hover:bg-emerald-500 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleApplyPreview}
+                    disabled={applyDisabled}
+                  >
+                    Aplicar cambios
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <DiagnosticsPanel metrics={metrics} logs={logs} />
 
@@ -1136,8 +1962,16 @@ function App() {
             </div>
           </div>
         </section>
+        </div>
       </div>
-    </div>
+      <PreviewDialog
+        open={isPreviewOpen}
+        onClose={handleClosePreview}
+        row={selectedRow}
+        calcResult={selectedCalc}
+        dialogId={previewDialogId}
+      />
+    </>
   );
 }
 
