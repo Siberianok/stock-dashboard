@@ -3,11 +3,22 @@
 Dashboard visual (checklist + scoring + gráficos) para filtrar candidatas momentum/parabólicas.
 
 ## Live (GitHub Pages)
-Este repo usa **GitHub Pages**. Hay dos formas de publicar:
-- **Con GitHub Actions (recomendado aquí):** cada `push` a `main` despliega automático.
-- **Deploy from a branch (simple):** seleccionar `main` y `/` como fuente en Settings → Pages.
+Este repo ya está listo para publicarse en **GitHub Pages** usando Actions.
 
-URL: `https://<usuario>.github.io/<repo>/`
+### Deploy automático (recomendado)
+- Cada `push` a `main` ejecuta el workflow [`Deploy dashboard to GitHub Pages`](.github/workflows/deploy.yml).
+- El workflow instala dependencias, corre los tests y compila la `dist/` con Vite.
+- El artefacto compilado se publica en la rama interna de Pages mediante `actions/deploy-pages`.
+- Asegurate de tener activado GitHub Pages en **Settings → Pages** con `Source: GitHub Actions`.
+
+### Deploy manual (fallback)
+Si querés un deploy manual:
+
+1. Ejecutá `npm run build` para generar la carpeta `dist/`.
+2. Subí el contenido de `dist/` a la rama configurada en Pages (por ejemplo `gh-pages` o `docs/`).
+3. Confirmá que la URL final respete el `base` configurado en `vite.config.js` (`/stock-dashboard/`).
+
+URL esperada: `https://<usuario>.github.io/<repo>/`
 
 ## Desarrollo local
 
@@ -23,6 +34,16 @@ El build de producción se genera con:
 ```bash
 npm run build
 ```
+
+## Checklist de verificación rápida
+
+Antes de publicar una nueva versión revisá:
+
+- `npm test` para asegurarte de que la lógica de cálculo y el modo simulado siguen funcionando.
+- `npm run build` para verificar que Vite genere `dist/` sin errores.
+- En el dashboard, probá **Activar modo simulado** si Yahoo Finance devuelve errores o límites: siempre deberías ver datos demo.
+- Confirmá en la consola del navegador que las peticiones a `https://query1.finance.yahoo.com/v7/finance/quote` devuelven 200 o, en caso contrario, que el modo simulado se activa.
+- En GitHub Pages, revisá que no haya 404 en los assets: el `base` de Vite (`/stock-dashboard/`) debe coincidir con la URL publicada.
 
 ## Estructura
 
