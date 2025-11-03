@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef, memo, forwardRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef, memo, forwardRef, useId } from 'react';
 import {
   ResponsiveContainer,
   Tooltip,
@@ -30,7 +30,7 @@ import { Badge } from './components/Badge.jsx';
 import { subscribeToMetrics } from './utils/metrics.js';
 import { subscribeToLogs, logError } from './utils/logger.js';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel.jsx';
-import { HistoricalComparisonCard } from './components/HistoricalComparisonCard.jsx';
+import { PreviewDialog } from './components/PreviewDialog.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -108,12 +108,16 @@ const ScoreDistributionCard = memo(
     { data, total, averageScore, timeRange, onExport, theme },
     ref,
   ) {
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Distribución de SCORE</h3>
-            <p className="text-xs text-white/60">Promedio ponderado: {fmt(averageScore, 1)} · {TIME_RANGE_LABELS[timeRange]}</p>
+            <h3 id={headingId} className="font-semibold text-base">Distribución de SCORE</h3>
+            <p id={descriptionId} className="text-xs text-white/60">
+              Promedio ponderado: {fmt(averageScore, 1)} · {TIME_RANGE_LABELS[timeRange]}
+            </p>
           </div>
           <button
             type="button"
@@ -122,23 +126,26 @@ const ScoreDistributionCard = memo(
               filename: 'score-distribution.png',
               backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
             })}
+            aria-label="Exportar gráfico de distribución"
           >
             Exportar
           </button>
         </div>
-        <ResponsiveContainer height={220}>
-          <PieChart>
-            <Tooltip
-              content={<ScoreDistributionTooltip total={total} timeRange={timeRange} />}
-              wrapperStyle={{ outline: 'none' }}
-            />
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2}>
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={entry.color} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <PieChart>
+              <Tooltip
+                content={<ScoreDistributionTooltip total={total} timeRange={timeRange} />}
+                wrapperStyle={{ outline: 'none' }}
+              />
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2}>
+                {data.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
         <div className="mt-3 text-xs text-white/70 text-center">Tickers promedio activos: {Math.round(total || 0)}</div>
       </div>
     );
@@ -148,12 +155,14 @@ const ScoreDistributionCard = memo(
 const FlowSankeyCard = memo(
   forwardRef(function FlowSankeyCard({ data, onExport, theme, timeRange, accentColor }, ref) {
     const nodeStroke = theme === 'dark' ? '#1e293b' : '#cbd5f5';
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Embudo de confirmaciones</h3>
-            <p className="text-xs text-white/60">Pasos promedio · {TIME_RANGE_LABELS[timeRange]}</p>
+            <h3 id={headingId} className="font-semibold text-base">Embudo de confirmaciones</h3>
+            <p id={descriptionId} className="text-xs text-white/60">Pasos promedio · {TIME_RANGE_LABELS[timeRange]}</p>
           </div>
           <button
             type="button"
@@ -162,22 +171,25 @@ const FlowSankeyCard = memo(
               filename: 'flujo-confirmaciones.png',
               backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
             })}
+            aria-label="Exportar gráfico de embudo"
           >
             Exportar
           </button>
         </div>
-        <ResponsiveContainer height={220}>
-          <Sankey
-            data={data}
-            nodePadding={24}
-            nodeWidth={18}
-            margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
-            link={{ stroke: accentColor, strokeWidth: 1.2 }}
-            node={{ stroke: nodeStroke, fill: accentColor }}
-          >
-            <Tooltip content={<SankeyTooltip timeRange={timeRange} />} wrapperStyle={{ outline: 'none' }} />
-          </Sankey>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <Sankey
+              data={data}
+              nodePadding={24}
+              nodeWidth={18}
+              margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
+              link={{ stroke: accentColor, strokeWidth: 1.2 }}
+              node={{ stroke: nodeStroke, fill: accentColor }}
+            >
+              <Tooltip content={<SankeyTooltip timeRange={timeRange} />} wrapperStyle={{ outline: 'none' }} />
+            </Sankey>
+          </ResponsiveContainer>
+        </div>
       </div>
     );
   }),
@@ -204,35 +216,55 @@ const RadarTooltip = ({ active, payload }) => {
 };
 
 const PerformanceRadarCard = memo(
-  forwardRef(function PerformanceRadarCard({ data, selectedRow, onExport, theme, accentColor }, ref) {
+  forwardRef(function PerformanceRadarCard(
+    { data, selectedRow, onExport, theme, accentColor, onOpenPreview, previewDialogId },
+    ref,
+  ) {
     const label = selectedRow?.ticker ? `${selectedRow.ticker} · ${selectedRow.market || ''}` : 'Sin selección';
+    const headingId = useId();
+    const descriptionId = useId();
     return (
       <div ref={ref} className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl min-h-[280px]`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-base">Perfil del ticker</h3>
-            <p className="text-xs text-white/60">{label}</p>
+            <h3 id={headingId} className="font-semibold text-base">Perfil del ticker</h3>
+            <p id={descriptionId} className="text-xs text-white/60">{label}</p>
           </div>
-          <button
-            type="button"
-            className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
-            onClick={() => onExport(ref?.current, {
-              filename: 'perfil-ticker.png',
-              backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
-            })}
-          >
-            Exportar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => onOpenPreview?.()}
+              disabled={!selectedRow}
+              aria-haspopup="dialog"
+              aria-controls={previewDialogId || undefined}
+            >
+              Abrir previsualización
+            </button>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+              onClick={() => onExport(ref?.current, {
+                filename: 'perfil-ticker.png',
+                backgroundColor: theme === 'dark' ? '#0c1427' : '#ffffff',
+              })}
+              aria-label="Exportar gráfico de radar"
+            >
+              Exportar
+            </button>
+          </div>
         </div>
-        <ResponsiveContainer height={220}>
-          <RadarChart data={data} outerRadius={80}>
-            <PolarGrid />
-            <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
-            <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
-            <Radar dataKey="v" stroke={accentColor} fill={accentColor} fillOpacity={0.3} />
-            <Tooltip content={<RadarTooltip />} wrapperStyle={{ outline: 'none' }} />
-          </RadarChart>
-        </ResponsiveContainer>
+        <div role="img" aria-labelledby={headingId} aria-describedby={descriptionId}>
+          <ResponsiveContainer height={220}>
+            <RadarChart data={data} outerRadius={80}>
+              <PolarGrid />
+              <PolarAngleAxis dataKey="k" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
+              <PolarRadiusAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickCount={5} angle={30} domain={[0, 100]} />
+              <Radar dataKey="v" stroke={accentColor} fill={accentColor} fillOpacity={0.3} />
+              <Tooltip content={<RadarTooltip />} wrapperStyle={{ outline: 'none' }} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
         <div className="mt-2 text-xs text-white/70 text-center">Click en una fila para actualizar el radar.</div>
       </div>
     );
@@ -446,6 +478,12 @@ function App() {
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
   const modeInitRef = useRef(true);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const previewDialogId = useId();
+  const marketsLegendId = useId();
+  const priceLegendId = useId();
+  const volumeLegendId = useId();
+  const technicalLegendId = useId();
 
   useEffect(() => {
     if (!rows.length) return;
@@ -467,6 +505,12 @@ function App() {
       }
     } catch (error) {
       logError('rows.selection.save', error);
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setPreviewOpen(false);
     }
   }, [selectedId]);
 
@@ -691,7 +735,32 @@ function App() {
     setRows(next);
     setSelectedId(next[0]?.id || null);
     setRefreshToken(Date.now());
+    setPreviewOpen(false);
   }, [scannerMatches, scannerState.lastUpdated, setRows]);
+
+  useEffect(() => {
+    const handleKeydown = (event) => {
+      if (event.defaultPrevented) return;
+      if (event.ctrlKey && !event.shiftKey && event.key === 'Enter') {
+        if (!scannerLoading && scannerMatches.length) {
+          event.preventDefault();
+          applyMatchesToTable();
+        }
+      }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        handleClearRows();
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'p') {
+        if (selectedRow) {
+          event.preventDefault();
+          setPreviewOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [applyMatchesToTable, scannerLoading, scannerMatches.length, handleClearRows, selectedRow]);
 
   const scannerUpdatedLabel = useMemo(() => {
     if (!scannerState.lastUpdated) return 'Sin datos';
@@ -716,6 +785,22 @@ function App() {
   const sortByScore = useCallback(() => {
     setRows((prev) => [...prev].sort((a, b) => (calc(b, b.market).score || 0) - (calc(a, a.market).score || 0)));
   }, [calc, setRows]);
+
+  const handleClearRows = useCallback(() => {
+    clearRows();
+    setSelectedId(null);
+    setPreviewOpen(false);
+  }, [clearRows]);
+
+  const handleOpenPreview = useCallback(() => {
+    if (selectedRow) {
+      setPreviewOpen(true);
+    }
+  }, [selectedRow]);
+
+  const handleClosePreview = useCallback(() => {
+    setPreviewOpen(false);
+  }, []);
 
   const volumeInputs = [
     {
@@ -1024,8 +1109,9 @@ function App() {
   }, [setRows]);
 
   return (
-    <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+    <>
+      <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
+        <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Selector de acciones parabólicas</h1>
@@ -1081,6 +1167,7 @@ function App() {
                   type="button"
                   onClick={() => setTimeRange(option.key)}
                   className={`px-2.5 py-1 rounded-full border ${timeRange === option.key ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10'} transition`}
+                  aria-pressed={timeRange === option.key}
                 >
                   {option.label}
                 </button>
@@ -1113,8 +1200,13 @@ function App() {
           <h2 className="text-xl font-semibold mb-4">Umbrales por mercado</h2>
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Mercados</h3>
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={marketsLegendId}>
+                <legend
+                  id={marketsLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Mercados
+                </legend>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {Object.entries(MARKETS).map(([key, info]) => (
                     <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
@@ -1128,104 +1220,132 @@ function App() {
                     </label>
                   ))}
                 </div>
-              </div>
+              </fieldset>
 
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio</h3>
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={priceLegendId}>
+                <legend
+                  id={priceLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Precio
+                </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <div key={key} className="space-y-2 bg-white/5 rounded-xl p-3">
-                      {(() => {
-                        const priceRange = thresholds.priceRange?.[key] || {};
-                        const minKey = `price-${key}-min`;
-                        const maxKey = `price-${key}-max`;
-                        const minError = getError(minKey);
-                        const maxError = getError(maxKey);
-                        const formatNumber = (val) => fmt(val, 2);
-                        return (
-                          <>
-                            <div className="text-center text-white/70 text-xs uppercase tracking-wide">{info.label}</div>
-                            <label className="flex flex-col gap-1 text-xs">
-                              <span className="text-white/80">Mínimo</span>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.1"
-                                min="0"
-                                aria-label={`Precio mínimo ${info.label}`}
-                                value={priceRange.min ?? ''}
-                                onChange={(e) => {
-                                  const nextValue = parseNumberInput(e);
-                                  applyNumericUpdate(minKey, nextValue, (validValue) => updatePriceRange(key, 'min', validValue), {
-                                    min: 0,
-                                    allowEmpty: false,
-                                    formatter: formatNumber,
-                                    validate: (val) => {
-                                      const maxVal = thresholds.priceRange?.[key]?.max;
-                                      if (Number.isFinite(maxVal) && val > maxVal) {
-                                        return `Debe ser ≤ ${formatNumber(maxVal)}`;
-                                      }
-                                      return null;
-                                    },
-                                  });
-                                }}
-                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
-                              />
-                              {minError ? <span className="text-[10px] text-rose-300">{minError}</span> : null}
-                            </label>
-                            <label className="flex flex-col gap-1 text-xs">
-                              <span className="text-white/80">Máximo</span>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.1"
-                                min="0"
-                                aria-label={`Precio máximo ${info.label}`}
-                                value={priceRange.max ?? ''}
-                                onChange={(e) => {
-                                  const nextValue = parseNumberInput(e);
-                                  applyNumericUpdate(maxKey, nextValue, (validValue) => updatePriceRange(key, 'max', validValue), {
-                                    min: 0,
-                                    allowEmpty: false,
-                                    formatter: formatNumber,
-                                    validate: (val) => {
-                                      const minVal = thresholds.priceRange?.[key]?.min;
-                                      if (Number.isFinite(minVal) && val < minVal) {
-                                        return `Debe ser ≥ ${formatNumber(minVal)}`;
-                                      }
-                                      return null;
-                                    },
-                                  });
-                                }}
-                                className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
-                              />
-                              {maxError ? <span className="text-[10px] text-rose-300">{maxError}</span> : null}
-                            </label>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ))}
+                  {Object.entries(MARKETS).map(([key, info]) => {
+                    const priceRange = thresholds.priceRange?.[key] || {};
+                    const minKey = `price-${key}-min`;
+                    const maxKey = `price-${key}-max`;
+                    const minError = getError(minKey);
+                    const maxError = getError(maxKey);
+                    const formatNumber = (val) => fmt(val, 2);
+                    const groupLabelId = `price-${key}-label`;
+                    const minInputId = `${minKey}-input`;
+                    const maxInputId = `${maxKey}-input`;
+                    return (
+                      <div
+                        key={key}
+                        className="space-y-2 bg-white/5 rounded-xl p-3"
+                        role="group"
+                        aria-labelledby={groupLabelId}
+                      >
+                        <div id={groupLabelId} className="text-center text-white/70 text-xs uppercase tracking-wide">
+                          {info.label}
+                        </div>
+                        <label className="flex flex-col gap-1 text-xs" htmlFor={minInputId}>
+                          <span className="text-white/80">Mínimo</span>
+                          <input
+                            id={minInputId}
+                            type="number"
+                            inputMode="decimal"
+                            step="0.1"
+                            min="0"
+                            value={priceRange.min ?? ''}
+                            aria-describedby={minError ? `${minInputId}-error` : undefined}
+                            onChange={(e) => {
+                              const nextValue = parseNumberInput(e);
+                              applyNumericUpdate(minKey, nextValue, (validValue) => updatePriceRange(key, 'min', validValue), {
+                                min: 0,
+                                allowEmpty: false,
+                                formatter: formatNumber,
+                                validate: (val) => {
+                                  const maxVal = thresholds.priceRange?.[key]?.max;
+                                  if (Number.isFinite(maxVal) && val > maxVal) {
+                                    return `Debe ser ≤ ${formatNumber(maxVal)}`;
+                                  }
+                                  return null;
+                                },
+                              });
+                            }}
+                            className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                          />
+                          {minError ? (
+                            <span id={`${minInputId}-error`} className="text-[10px] text-rose-300">
+                              {minError}
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs" htmlFor={maxInputId}>
+                          <span className="text-white/80">Máximo</span>
+                          <input
+                            id={maxInputId}
+                            type="number"
+                            inputMode="decimal"
+                            step="0.1"
+                            min="0"
+                            value={priceRange.max ?? ''}
+                            aria-describedby={maxError ? `${maxInputId}-error` : undefined}
+                            onChange={(e) => {
+                              const nextValue = parseNumberInput(e);
+                              applyNumericUpdate(maxKey, nextValue, (validValue) => updatePriceRange(key, 'max', validValue), {
+                                min: 0,
+                                allowEmpty: false,
+                                formatter: formatNumber,
+                                validate: (val) => {
+                                  const minVal = thresholds.priceRange?.[key]?.min;
+                                  if (Number.isFinite(minVal) && val < minVal) {
+                                    return `Debe ser ≥ ${formatNumber(minVal)}`;
+                                  }
+                                  return null;
+                                },
+                              });
+                            }}
+                            className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+                          />
+                          {maxError ? (
+                            <span id={`${maxInputId}-error`} className="text-[10px] text-rose-300">
+                              {maxError}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+              </fieldset>
             </div>
 
             <div className="space-y-4">
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Volumen & Float</h3>
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={volumeLegendId}>
+                <legend
+                  id={volumeLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Volumen & Float
+                </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center items-start justify-items-center">
                   {volumeInputs.map((field) => {
                     const error = getError(field.key);
+                    const inputId = `${field.key}-input`;
                     return (
-                      <label key={field.key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                      <label key={field.key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor={inputId}>
                         <span className="text-white/80 font-medium">{field.label}</span>
                         <input
+                          id={inputId}
                           type="number"
                           inputMode="decimal"
                           step={field.step}
                           min={field.min ?? 0}
-                          aria-label={field.label}
                           value={field.value ?? ''}
+                          aria-describedby={error ? `${inputId}-error` : undefined}
                           onChange={(e) => {
                             const nextValue = parseNumberInput(e);
                             applyNumericUpdate(
@@ -1244,56 +1364,68 @@ function App() {
                           }}
                           className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
                         />
-                        {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
+                        {error ? (
+                          <span id={`${inputId}-error`} className="text-[10px] text-rose-300">
+                            {error}
+                          </span>
+                        ) : null}
                       </label>
                     );
                   })}
                 </div>
-              </div>
+              </fieldset>
 
-              <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-                <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Técnico & Micro</h3>
+              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={technicalLegendId}>
+                <legend
+                  id={technicalLegendId}
+                  className="font-semibold mb-4 text-center text-lg tracking-wide"
+                >
+                  Técnico & Micro
+                </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
-                      <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
-                      {(() => {
-                        const errorKey = `liq-${key}`;
-                        const error = getError(errorKey);
-                        return (
-                          <>
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              step="0.5"
-                              min="0"
-                              aria-label={`Liquidez mínima ${info.label}`}
-                              value={thresholds.liquidityMin?.[key] ?? ''}
-                              onChange={(e) => {
-                                const nextValue = parseNumberInput(e);
-                                applyNumericUpdate(errorKey, nextValue, (validValue) => updateLiquidityMin(key, validValue), {
-                                  min: 0,
-                                  allowEmpty: false,
-                                  formatter: (val) => fmt(val, 1),
-                                });
-                              }}
-                              className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
-                            />
-                            {error ? <span className="text-[10px] text-rose-300">{error}</span> : null}
-                          </>
-                        );
-                      })()}
-                    </label>
-                  ))}
-                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
+                  {Object.entries(MARKETS).map(([key, info]) => {
+                    const errorKey = `liq-${key}`;
+                    const error = getError(errorKey);
+                    const inputId = `${errorKey}-input`;
+                    return (
+                      <label key={key} className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor={inputId}>
+                        <span className="text-white/80 font-medium">Liquidez mínima (M, {info.currency})</span>
+                        <input
+                          id={inputId}
+                          type="number"
+                          inputMode="decimal"
+                          step="0.5"
+                          min="0"
+                          value={thresholds.liquidityMin?.[key] ?? ''}
+                          aria-describedby={error ? `${inputId}-error` : undefined}
+                          onChange={(e) => {
+                            const nextValue = parseNumberInput(e);
+                            applyNumericUpdate(errorKey, nextValue, (validValue) => updateLiquidityMin(key, validValue), {
+                              min: 0,
+                              allowEmpty: false,
+                              formatter: (val) => fmt(val, 1),
+                            });
+                          }}
+                          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
+                        />
+                        {error ? (
+                          <span id={`${inputId}-error`} className="text-[10px] text-rose-300">
+                            {error}
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                  <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2" htmlFor="spread-max-input">
                     <span className="text-white/80 font-medium">Spread ≤ %</span>
                     <input
+                      id="spread-max-input"
                       type="number"
                       step="0.1"
                       min="0"
                       inputMode="decimal"
-                      aria-label="Spread máximo permitido"
                       value={thresholds.spreadMaxPct ?? ''}
+                      aria-describedby={getError('spreadMaxPct') ? 'spread-max-error' : undefined}
                       onChange={(e) => {
                         const nextValue = parseNumberInput(e);
                         applyNumericUpdate(
@@ -1309,28 +1441,32 @@ function App() {
                       }}
                       className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-center"
                     />
-                    {getError('spreadMaxPct') ? <span className="text-[10px] text-rose-300">{getError('spreadMaxPct')}</span> : null}
+                    {getError('spreadMaxPct') ? (
+                      <span id="spread-max-error" className="text-[10px] text-rose-300">
+                        {getError('spreadMaxPct')}
+                      </span>
+                    ) : null}
                   </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1" htmlFor="need-ema-200">
                     <input
+                      id="need-ema-200"
                       type="checkbox"
-                      aria-label="Requerir precio mayor a EMA200"
                       checked={thresholds.needEMA200}
                       onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))}
                     />
-                    <span>Requerir precio &gt; EMA200</span>
+                    <span id="need-ema-200-label">Requerir precio &gt; EMA200</span>
                   </label>
-                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1">
+                  <label className="sm:col-span-2 w-full flex items-center justify-center gap-2 mt-1" htmlFor="mode-parabolic">
                     <input
+                      id="mode-parabolic"
                       type="checkbox"
-                      aria-label="Activar modo parabólico"
                       checked={thresholds.parabolic50}
                       onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))}
                     />
-                    <span>Modo parabólico (≥ 50%)</span>
+                    <span id="mode-parabolic-label">Modo parabólico (≥ 50%)</span>
                   </label>
                 </div>
-              </div>
+              </fieldset>
             </div>
           </div>
         </section>
@@ -1360,6 +1496,8 @@ function App() {
             onExport={exportChart}
             theme={theme}
             accentColor={palette.chart.accent}
+            onOpenPreview={handleOpenPreview}
+            previewDialogId={previewDialogId}
           />
           <HistoricalComparisonCard
             ref={historicalCardRef}
@@ -1408,6 +1546,9 @@ function App() {
                 </button>
                 <button className="px-3 py-1.5 rounded-xl bg-white/10 ring-1 ring-white/15 hover:bg-white/15 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={triggerScan} disabled={scannerLoading} type="button">Escanear ahora</button>
                 <button className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow hover:from-emerald-400 hover:to-teal-500 transition disabled:opacity-60 disabled:cursor-not-allowed" onClick={applyMatchesToTable} disabled={scannerLoading || !scannerMatches.length} type="button">Cargar en tabla</button>
+                <div className="basis-full text-right text-[11px] text-white/60">
+                  Atajos: Ctrl+Enter aplica coincidencias, Ctrl+Shift+D limpia la tabla, Ctrl+P abre la previsualización.
+                </div>
               </div>
             </div>
           </div>
@@ -1432,7 +1573,7 @@ function App() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
-                      <div className="flex-1"><ScoreBar value={computed.score || 0} /></div>
+                      <div className="flex-1"><ScoreBar value={computed.score || 0} label={`Score ${data.ticker}`} /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs text-white/70">
                       <div>
@@ -1497,10 +1638,7 @@ function App() {
           onSelect={setSelectedId}
           onUpdate={updateRow}
           onAddRow={addRow}
-          onClearRows={() => {
-            clearRows();
-            setSelectedId(null);
-          }}
+          onClearRows={handleClearRows}
           onSortByScore={sortByScore}
           onExport={exportCSV}
           lastUpdatedLabel={lastUpdatedLabel}
@@ -1561,8 +1699,16 @@ function App() {
             </div>
           </div>
         </section>
+        </div>
       </div>
-    </div>
+      <PreviewDialog
+        open={isPreviewOpen}
+        onClose={handleClosePreview}
+        row={selectedRow}
+        calcResult={selectedCalc}
+        dialogId={previewDialogId}
+      />
+    </>
   );
 }
 
