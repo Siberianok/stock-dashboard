@@ -423,8 +423,9 @@ const toCSVCell = (value) => {
 function App() {
   const {
     thresholds,
+    activeThresholds,
     history: thresholdsHistory,
-    thresholdsKey,
+    thresholdsKey: activeThresholdsKey,
     updatePriceRange,
     updateLiquidityMin,
     toggleMarket,
@@ -433,11 +434,19 @@ function App() {
     setThresholds,
     undo: undoThresholds,
     pushSnapshot,
+    saveDraft,
+    applyDraft,
+    discardDraft,
+    hasDraftChanges,
+    hasUnsavedDraftChanges,
+    draftMeta,
   } = useThresholds();
   const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
+  const activeCalc = useMemo(() => createCalc(activeThresholds), [activeThresholds]);
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
+  const [draftNotice, setDraftNotice] = useState(null);
   const setFieldError = useCallback((key, message) => {
     setValidationErrors((prev) => {
       if (message) {
@@ -472,6 +481,44 @@ function App() {
     const stored = window.localStorage.getItem(SELECTED_ROW_STORAGE_KEY);
     return stored || null;
   });
+  const handleSaveDraft = useCallback(() => {
+    const savedAt = saveDraft();
+    setDraftNotice({ type: 'saved', timestamp: savedAt });
+  }, [saveDraft]);
+  const handleApplyDraft = useCallback(() => {
+    const { applied, appliedAt } = applyDraft({ label: 'Aplicar borrador' });
+    setDraftNotice({ type: applied ? 'applied' : 'noop', timestamp: appliedAt });
+  }, [applyDraft]);
+  const handleDiscardDraft = useCallback(() => {
+    const discardedAt = discardDraft();
+    setDraftNotice({ type: 'discarded', timestamp: discardedAt });
+  }, [discardDraft]);
+  const draftStatusLabel = useMemo(() => {
+    if (!draftNotice) return null;
+    const { type, timestamp } = draftNotice;
+    const parsed = timestamp ? new Date(timestamp) : null;
+    const timeLabel = parsed && !Number.isNaN(parsed.getTime())
+      ? parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : null;
+    switch (type) {
+      case 'saved':
+        return `Borrador guardado${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'applied':
+        return `Borrador aplicado${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'discarded':
+        return `Cambios descartados${timeLabel ? ` · ${timeLabel}` : ''}`;
+      case 'noop':
+        return 'No hay cambios para aplicar.';
+      default:
+        return null;
+    }
+  }, [draftNotice]);
+  const draftSavedAtLabel = useMemo(() => {
+    if (!draftMeta?.savedAt) return 'Nunca';
+    const parsed = new Date(draftMeta.savedAt);
+    if (Number.isNaN(parsed.getTime())) return 'Desconocido';
+    return parsed.toLocaleString();
+  }, [draftMeta?.savedAt]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [dataMode, setDataMode] = useState('live');
   const [loadingQuotes, setLoadingQuotes] = useState(false);
@@ -715,16 +762,16 @@ function App() {
   }, [selectedCalc, selectedRow, thresholds]);
 
   const { state: scannerState, triggerScan } = useScanner({
-    thresholds,
-    calc,
-    thresholdsKey,
+    thresholds: activeThresholds,
+    calc: activeCalc,
+    thresholdsKey: activeThresholdsKey,
     mode: dataMode,
     coverageThreshold: 0.8,
   });
   const scannerMatchesRaw = scannerState.matches || [];
   const scannerLoading = !!scannerState.loading;
   const scannerError = scannerState.error;
-  const scannerResultsStale = !!(scannerState.lastThresholdsKey && scannerState.lastThresholdsKey !== thresholdsKey);
+  const scannerResultsStale = !!(scannerState.lastThresholdsKey && scannerState.lastThresholdsKey !== activeThresholdsKey);
   const scannerMatches = scannerResultsStale ? [] : scannerMatchesRaw;
 
   const applyMatchesToTable = useCallback(() => {
@@ -1152,6 +1199,37 @@ function App() {
               ) : (
                 <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
               )}
+            </div>
+            <div className="pt-3 border-t border-white/10 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-white/60">Borradores de filtros</div>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleSaveDraft}
+                disabled={!hasUnsavedDraftChanges}
+              >
+                Guardar borrador
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleApplyDraft}
+                disabled={!hasDraftChanges}
+              >
+                Aplicar borrador
+              </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleDiscardDraft}
+                disabled={!hasDraftChanges && !hasUnsavedDraftChanges}
+              >
+                Descartar cambios
+              </button>
+              <div className="text-[11px] text-white/60 leading-snug space-y-1">
+                <p>{hasDraftChanges ? 'El borrador es diferente a los filtros activos.' : 'El borrador coincide con los filtros activos.'}</p>
+                <p className={hasUnsavedDraftChanges ? 'text-amber-300' : ''}>
+                  {hasUnsavedDraftChanges ? 'Cambios pendientes de guardar.' : `Último guardado: ${draftSavedAtLabel}`}
+                </p>
+                {draftStatusLabel ? <p className="text-white/70">{draftStatusLabel}</p> : null}
+              </div>
             </div>
           </div>
         </header>
