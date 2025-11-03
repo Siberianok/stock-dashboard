@@ -47,6 +47,18 @@
   --space-10: 3rem;
 }
 
+.visualmente-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 :root[data-theme='light'] {
   --color-bg-canvas: #f1f5f9;
   --color-bg-gradient: linear-gradient(160deg, #eff6ff 0%, #e0f2fe 40%, #fdf2f8 100%);
