@@ -167,3 +167,25 @@ export const areThresholdsEqual = (a, b) => {
 };
 
 export const cloneThresholds = (thresholds) => clone(thresholds);
+
+const pickSignatureFields = (thresholds = {}) => ({
+  marketsEnabled: thresholds.marketsEnabled,
+  priceRange: thresholds.priceRange,
+  liquidityMin: thresholds.liquidityMin,
+  rvolMin: thresholds.rvolMin,
+  rvolIdeal: thresholds.rvolIdeal,
+  atrMin: thresholds.atrMin,
+  atrPctMin: thresholds.atrPctMin,
+  chgMin: thresholds.chgMin,
+  parabolic50: thresholds.parabolic50,
+  needEMA200: thresholds.needEMA200,
+  float50: thresholds.float50,
+  float10: thresholds.float10,
+  rotationMin: thresholds.rotationMin,
+  rotationIdeal: thresholds.rotationIdeal,
+  shortMin: thresholds.shortMin,
+  spreadMaxPct: thresholds.spreadMaxPct,
+});
+
+export const createThresholdSignature = (thresholds) =>
+  JSON.stringify(pickSignatureFields(thresholds));

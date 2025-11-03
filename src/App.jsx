@@ -272,65 +272,6 @@ const PerformanceRadarCard = memo(
   }),
 );
 
-const parseNumberInput = (input) => {
-  const value =
-    input && typeof input === 'object' && 'target' in input ? input.target?.value : input;
-  if (value === '' || value === null || value === undefined) return undefined;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : undefined;
-};
-
-const formatValueForError = (value, formatter) => {
-  try {
-    return formatter(value);
-  } catch (error) {
-    return String(value);
-  }
-};
-
-const validateNumericValue = (value, options = {}) => {
-  const {
-    allowEmpty = true,
-    allowZero = true,
-    min = Number.NEGATIVE_INFINITY,
-    max = Number.POSITIVE_INFINITY,
-    formatter = (val) => (typeof val === 'number' ? val.toString() : String(val)),
-    validate,
-  } = options;
-
-  if (value === undefined || value === null || value === '') {
-    if (allowEmpty) {
-      return { error: null, value: undefined };
-    }
-    return { error: 'Requerido', value: undefined };
-  }
-
-  if (!Number.isFinite(value)) {
-    return { error: 'Debe ser un número válido', value: undefined };
-  }
-
-  if (!allowZero && value === 0) {
-    return { error: 'Debe ser mayor a 0', value: undefined };
-  }
-
-  if (Number.isFinite(min) && value < min) {
-    return { error: `Debe ser ≥ ${formatValueForError(min, formatter)}`, value: undefined };
-  }
-
-  if (Number.isFinite(max) && value > max) {
-    return { error: `Debe ser ≤ ${formatValueForError(max, formatter)}`, value: undefined };
-  }
-
-  if (typeof validate === 'function') {
-    const customError = validate(value);
-    if (typeof customError === 'string' && customError.trim()) {
-      return { error: customError, value: undefined };
-    }
-  }
-
-  return { error: null, value };
-};
-
 const ROWS_STORAGE_KEY = 'selector.rows.v1';
 const SELECTED_ROW_STORAGE_KEY = 'selector.selectedRowId.v1';
 const isBrowser = typeof window !== 'undefined';
@@ -422,6 +363,7 @@ const toCSVCell = (value) => {
 };
 
 function App() {
+  const filterForm = useFilterForm();
   const {
     thresholds,
     activeThresholds,
@@ -432,7 +374,6 @@ function App() {
     toggleMarket,
     presetModerado,
     presetAgresivo,
-    setThresholds,
     undo: undoThresholds,
     pushSnapshot,
     saveDraft,
