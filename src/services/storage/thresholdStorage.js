@@ -8,7 +8,7 @@ import {
 const isBrowser = typeof window !== 'undefined';
 const STORAGE_KEY = 'selector.thresholds';
 const LEGACY_KEYS = ['selector.thresholds.v1'];
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 export const MAX_THRESHOLD_HISTORY = 10;
 
 const memoryStore = new Map();
@@ -129,10 +129,21 @@ const normalizeHistory = (entries) => {
 const finalizeState = (state) => {
   const thresholds = normalizeThresholds(state?.thresholds);
   const history = normalizeHistory(state?.history);
+  const draftSource = state?.draft;
+  const draftThresholds = normalizeThresholds(draftSource?.thresholds ?? thresholds);
+  const savedAt = typeof draftSource?.savedAt === 'string' ? draftSource.savedAt : null;
+  const updatedAtCandidate = typeof draftSource?.updatedAt === 'string' ? draftSource.updatedAt : null;
+  const timestamp = new Date().toISOString();
+  const updatedAt = updatedAtCandidate || savedAt || timestamp;
   return {
     version: CURRENT_VERSION,
     thresholds,
     history,
+    draft: {
+      thresholds: cloneThresholds(draftThresholds),
+      savedAt,
+      updatedAt,
+    },
   };
 };
 
@@ -156,6 +167,26 @@ const migrateToV2 = (payload) => {
   };
 };
 
+const migrateToV3 = (payload) => {
+  const thresholds = normalizeThresholds(payload?.thresholds ?? DEFAULT_THRESHOLDS);
+  const history = normalizeHistory(payload?.history);
+  const timestamp = new Date().toISOString();
+  return {
+    version: 3,
+    thresholds,
+    history,
+    draft: {
+      thresholds: cloneThresholds(payload?.draft?.thresholds ?? thresholds),
+      savedAt: typeof payload?.draft?.savedAt === 'string' ? payload.draft.savedAt : timestamp,
+      updatedAt: typeof payload?.draft?.updatedAt === 'string'
+        ? payload.draft.updatedAt
+        : typeof payload?.draft?.savedAt === 'string'
+          ? payload.draft.savedAt
+          : timestamp,
+    },
+  };
+};
+
 const applyMigrations = (payload) => {
   if (!payload) {
     return finalizeState({ thresholds: DEFAULT_THRESHOLDS, history: [] });
@@ -170,6 +201,10 @@ const applyMigrations = (payload) => {
   }
   if (version < 2) {
     current = migrateToV2(current);
+    version = current.version;
+  }
+  if (version < 3) {
+    current = migrateToV3(current);
     version = current.version;
   }
 
@@ -198,6 +233,7 @@ export const loadThresholdState = () => {
   return {
     thresholds: migrated.thresholds,
     history: migrated.history,
+    draft: migrated.draft,
   };
 };
 
@@ -215,6 +251,10 @@ export const pushSnapshot = (state, { label } = {}) => {
 };
 
 export const shouldPersistUpdate = (previous, next) => {
+  const draftChanged = !areThresholdsEqual(previous?.draft?.thresholds, next?.draft?.thresholds) ||
+    previous?.draft?.savedAt !== next?.draft?.savedAt ||
+    previous?.draft?.updatedAt !== next?.draft?.updatedAt;
   return !areThresholdsEqual(previous.thresholds, next.thresholds) ||
-    previous.history.length !== next.history.length;
+    previous.history.length !== next.history.length ||
+    draftChanged;
 };
