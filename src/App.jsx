@@ -21,6 +21,7 @@ import { fetchQuotes, clearCache } from './services/yahooFinance.js';
 import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
+import { useHistoricalBenchmarks } from './hooks/useHistoricalBenchmarks.js';
 import { useTheme } from './hooks/useTheme.js';
 import { useChartExport } from './hooks/useChartExport.js';
 import { TickerTable } from './components/TickerTable.jsx';
@@ -29,6 +30,7 @@ import { Badge } from './components/Badge.jsx';
 import { subscribeToMetrics } from './utils/metrics.js';
 import { subscribeToLogs, logError } from './utils/logger.js';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel.jsx';
+import { HistoricalComparisonCard } from './components/HistoricalComparisonCard.jsx';
 
 const Stat = ({ label, value, sub, icon }) => (
   <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-lg flex flex-col items-center text-center gap-2`}>
@@ -629,9 +631,14 @@ function App() {
     clearHistory,
   } = dashboardMetrics;
 
+  const historicalBenchmarks = useHistoricalBenchmarks({ thresholds, timeRange });
+  const { benchmark: historicalBenchmark, loading: historicalLoading, error: historicalError } = historicalBenchmarks;
+  const historicalCurrentMetrics = useMemo(() => ({ averageScore, kpis }), [averageScore, kpis]);
+
   const scoreChartRef = useRef(null);
   const sankeyChartRef = useRef(null);
   const radarChartRef = useRef(null);
+  const historicalCardRef = useRef(null);
 
   const selectedRow = useMemo(() => {
     const found = rows.find((row) => row.id === selectedId);
@@ -1328,7 +1335,7 @@ function App() {
           </div>
         </section>
 
-        <section className="grid md:grid-cols-3 gap-4 mt-6">
+        <section className="grid gap-4 mt-6 md:grid-cols-2 lg:grid-cols-4">
           <ScoreDistributionCard
             ref={scoreChartRef}
             data={scoreDistribution}
@@ -1353,6 +1360,17 @@ function App() {
             onExport={exportChart}
             theme={theme}
             accentColor={palette.chart.accent}
+          />
+          <HistoricalComparisonCard
+            ref={historicalCardRef}
+            benchmark={historicalBenchmark}
+            current={historicalCurrentMetrics}
+            timeRangeLabel={TIME_RANGE_LABELS[timeRange] || ''}
+            loading={historicalLoading}
+            error={historicalError}
+            onExport={exportChart}
+            theme={theme}
+            palette={palette.chart}
           />
         </section>
 
