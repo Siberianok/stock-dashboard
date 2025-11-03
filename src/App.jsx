@@ -475,7 +475,6 @@ function App() {
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
   const modeInitRef = useRef(true);
-  const [isPreviewOpen, setPreviewOpen] = useState(false);
   const previewDialogId = useId();
   const marketsLegendId = useId();
   const priceLegendId = useId();
