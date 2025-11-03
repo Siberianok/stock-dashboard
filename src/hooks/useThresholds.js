@@ -1,71 +1,66 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
-import { logError } from '../utils/logger.js';
+import { useMemo, useCallback, useSyncExternalStore } from 'react';
 import {
   DEFAULT_THRESHOLDS,
   applyPresetModerado,
   applyPresetAgresivo,
 } from './thresholdConfig.js';
-import {
-  normalizeThresholds,
-  areThresholdsEqual,
-} from '../utils/thresholds.js';
-import {
-  loadThresholdState,
-  persistThresholdState,
-  createSnapshot,
-  MAX_THRESHOLD_HISTORY,
-} from '../services/storage/thresholdStorage.js';
+import { areThresholdsEqual } from '../utils/thresholds.js';
+import { filtersStore } from '../store/filters.js';
 
-const cloneState = (state) => ({
-  thresholds: normalizeThresholds(state.thresholds ?? DEFAULT_THRESHOLDS),
-  history: Array.isArray(state.history) ? [...state.history] : [],
-});
+const buildKey = (thresholds = DEFAULT_THRESHOLDS) =>
+  JSON.stringify({
+    marketsEnabled: thresholds.marketsEnabled,
+    priceRange: thresholds.priceRange,
+    liquidityMin: thresholds.liquidityMin,
+    rvolMin: thresholds.rvolMin,
+    rvolIdeal: thresholds.rvolIdeal,
+    atrMin: thresholds.atrMin,
+    atrPctMin: thresholds.atrPctMin,
+    chgMin: thresholds.chgMin,
+    parabolic50: thresholds.parabolic50,
+    needEMA200: thresholds.needEMA200,
+    float50: thresholds.float50,
+    float10: thresholds.float10,
+    rotationMin: thresholds.rotationMin,
+    rotationIdeal: thresholds.rotationIdeal,
+    shortMin: thresholds.shortMin,
+    spreadMaxPct: thresholds.spreadMaxPct,
+  });
 
 export function useThresholds() {
-  const [state, setState] = useState(() => cloneState(loadThresholdState()));
+  const state = useSyncExternalStore(
+    filtersStore.subscribe,
+    filtersStore.getState,
+    filtersStore.getState,
+  );
 
-  useEffect(() => {
-    persistThresholdState(state);
-  }, [state]);
+  const draftThresholds = state.draft.thresholds;
+  const appliedThresholds = state.applied.thresholds;
+  const history = state.applied.history;
+  const hasDraftChanges = state.draft.dirty || !areThresholdsEqual(draftThresholds, appliedThresholds);
 
-  const commit = useCallback((updater, { snapshot = true, label } = {}) => {
-    setState((prevState) => {
-      const previous = prevState.thresholds;
-      const nextValue = typeof updater === 'function' ? updater(previous) : updater;
-      const normalized = normalizeThresholds(nextValue);
-
-      if (areThresholdsEqual(previous, normalized)) {
-        return prevState;
-      }
-
-      const nextHistory = snapshot
-        ? [...prevState.history, createSnapshot(previous, { label })].slice(-MAX_THRESHOLD_HISTORY)
-        : prevState.history;
-
-      return {
-        thresholds: normalized,
-        history: nextHistory,
-      };
-    });
-  }, []);
+  const thresholdsKey = useMemo(() => buildKey(appliedThresholds), [appliedThresholds]);
 
   const setThresholds = useCallback((value) => {
-    commit(value);
-  }, [commit]);
+    filtersStore.updateDraft(value);
+  }, []);
 
   const updatePriceRange = useCallback((market, field, value) => {
-    commit((prev) => {
+    filtersStore.updateDraft((prev) => {
       const prevMarket = prev.priceRange?.[market] || {};
       if (value === undefined) {
         if (!(field in prevMarket)) return prev;
         const nextMarket = { ...prevMarket };
         delete nextMarket[field];
+        const nextPriceRange = { ...prev.priceRange };
+        if (Object.keys(nextMarket).length) {
+          nextPriceRange[market] = nextMarket;
+        } else {
+          delete nextPriceRange[market];
+        }
         return {
           ...prev,
-          priceRange: {
-            ...prev.priceRange,
-            [market]: nextMarket,
-          },
+          priceRange: nextPriceRange,
         };
       }
       return {
@@ -76,10 +71,10 @@ export function useThresholds() {
         },
       };
     });
-  }, [commit]);
+  }, []);
 
   const updateLiquidityMin = useCallback((market, value) => {
-    commit((prev) => {
+    filtersStore.updateDraft((prev) => {
       const prevLiquidity = prev.liquidityMin || {};
       if (value === undefined) {
         if (!(market in prevLiquidity)) return prev;
@@ -98,83 +93,62 @@ export function useThresholds() {
         },
       };
     });
-  }, [commit]);
+  }, []);
 
   const toggleMarket = useCallback((market, enabled) => {
-    commit((prev) => ({
+    filtersStore.updateDraft((prev) => ({
       ...prev,
       marketsEnabled: {
         ...prev.marketsEnabled,
         [market]: enabled,
       },
     }));
-  }, [commit]);
+  }, []);
 
   const presetModerado = useCallback(() => {
-    commit((prev) => applyPresetModerado(prev), { label: 'Preset moderado' });
-  }, [commit]);
+    filtersStore.updateDraft((prev) => applyPresetModerado(prev));
+  }, []);
 
   const presetAgresivo = useCallback(() => {
-    commit((prev) => applyPresetAgresivo(prev), { label: 'Preset agresivo' });
-  }, [commit]);
+    filtersStore.updateDraft((prev) => applyPresetAgresivo(prev));
+  }, []);
 
   const undo = useCallback(() => {
-    setState((prevState) => {
-      if (!prevState.history.length) {
-        return prevState;
-      }
-      const nextHistory = prevState.history.slice(0, -1);
-      const lastSnapshot = prevState.history[prevState.history.length - 1];
-      const restored = normalizeThresholds(lastSnapshot.thresholds);
-      if (areThresholdsEqual(prevState.thresholds, restored)) {
-        return {
-          thresholds: restored,
-          history: nextHistory,
-        };
-      }
-      return {
-        thresholds: restored,
-        history: nextHistory,
-      };
-    });
+    filtersStore.undo();
   }, []);
 
   const pushSnapshot = useCallback((label) => {
-    setState((prevState) => {
-      const nextHistory = [...prevState.history, createSnapshot(prevState.thresholds, { label })]
-        .slice(-MAX_THRESHOLD_HISTORY);
-      return {
-        thresholds: prevState.thresholds,
-        history: nextHistory,
-      };
-    });
+    filtersStore.pushSnapshot(label);
   }, []);
 
-  const thresholdsKey = useMemo(
-    () => JSON.stringify({
-      marketsEnabled: state.thresholds.marketsEnabled,
-      priceRange: state.thresholds.priceRange,
-      liquidityMin: state.thresholds.liquidityMin,
-      rvolMin: state.thresholds.rvolMin,
-      rvolIdeal: state.thresholds.rvolIdeal,
-      atrMin: state.thresholds.atrMin,
-      atrPctMin: state.thresholds.atrPctMin,
-      chgMin: state.thresholds.chgMin,
-      parabolic50: state.thresholds.parabolic50,
-      needEMA200: state.thresholds.needEMA200,
-      float50: state.thresholds.float50,
-      float10: state.thresholds.float10,
-      rotationMin: state.thresholds.rotationMin,
-      rotationIdeal: state.thresholds.rotationIdeal,
-      shortMin: state.thresholds.shortMin,
-      spreadMaxPct: state.thresholds.spreadMaxPct,
-    }),
-    [state.thresholds],
-  );
+  const applyDraft = useCallback((options) => {
+    filtersStore.applyDraft(options);
+  }, []);
+
+  const resetDraft = useCallback(() => {
+    filtersStore.resetDraft();
+  }, []);
+
+  const startPreview = useCallback(() => {
+    filtersStore.startPreview();
+  }, []);
+
+  const completePreview = useCallback((result) => {
+    filtersStore.completePreview(result);
+  }, []);
+
+  const failPreview = useCallback((message) => {
+    filtersStore.failPreview(message);
+  }, []);
+
+  const clearPreview = useCallback(() => {
+    filtersStore.clearPreview();
+  }, []);
 
   return {
-    thresholds: state.thresholds,
-    history: state.history,
+    thresholds: draftThresholds,
+    appliedThresholds,
+    history,
     setThresholds,
     thresholdsKey,
     updatePriceRange,
@@ -184,5 +158,13 @@ export function useThresholds() {
     presetAgresivo,
     undo,
     pushSnapshot,
+    applyDraft,
+    resetDraft,
+    preview: state.preview,
+    hasDraftChanges,
+    startPreview,
+    completePreview,
+    failPreview,
+    clearPreview,
   };
 }
