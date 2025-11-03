@@ -365,7 +365,7 @@ const toCSVCell = (value) => {
 function App() {
   const filterForm = useFilterForm();
   const {
-    thresholds,
+    thresholds: draftThresholds,
     activeThresholds,
     history: thresholdsHistory,
     thresholdsKey: activeThresholdsKey,
@@ -385,7 +385,7 @@ function App() {
   } = useThresholds();
   const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
   const activeCalc = useMemo(() => createCalc(activeThresholds), [activeThresholds]);
-  const calc = useMemo(() => createCalc(thresholds), [thresholds]);
+  const calc = useMemo(() => createCalc(draftThresholds), [draftThresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
   const [draftNotice, setDraftNotice] = useState(null);
@@ -671,7 +671,7 @@ function App() {
     clearHistory,
   } = dashboardMetrics;
 
-  const historicalBenchmarks = useHistoricalBenchmarks({ thresholds, timeRange });
+  const historicalBenchmarks = useHistoricalBenchmarks({ thresholds: draftThresholds, timeRange });
   const { benchmark: historicalBenchmark, loading: historicalLoading, error: historicalError } = historicalBenchmarks;
   const historicalCurrentMetrics = useMemo(() => ({ averageScore, kpis }), [averageScore, kpis]);
 
@@ -1327,7 +1327,7 @@ function App() {
                 </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   {Object.entries(MARKETS).map(([key, info]) => {
-                    const priceRange = thresholds.priceRange?.[key] || {};
+                    const priceRange = draftThresholds.priceRange?.[key] || {};
                     const minKey = `price-${key}-min`;
                     const maxKey = `price-${key}-max`;
                     const minError = getError(minKey);
@@ -1363,7 +1363,7 @@ function App() {
                                 allowEmpty: false,
                                 formatter: formatNumber,
                                 validate: (val) => {
-                                  const maxVal = thresholds.priceRange?.[key]?.max;
+                                  const maxVal = draftThresholds.priceRange?.[key]?.max;
                                   if (Number.isFinite(maxVal) && val > maxVal) {
                                     return `Debe ser ≤ ${formatNumber(maxVal)}`;
                                   }
@@ -1396,7 +1396,7 @@ function App() {
                                 allowEmpty: false,
                                 formatter: formatNumber,
                                 validate: (val) => {
-                                  const minVal = thresholds.priceRange?.[key]?.min;
+                                  const minVal = draftThresholds.priceRange?.[key]?.min;
                                   if (Number.isFinite(minVal) && val < minVal) {
                                     return `Debe ser ≥ ${formatNumber(minVal)}`;
                                   }
@@ -1492,7 +1492,7 @@ function App() {
                           inputMode="decimal"
                           step="0.5"
                           min="0"
-                          value={thresholds.liquidityMin?.[key] ?? ''}
+                          value={draftThresholds.liquidityMin?.[key] ?? ''}
                           aria-describedby={error ? `${inputId}-error` : undefined}
                           onChange={(e) => {
                             const nextValue = parseNumberInput(e);
@@ -1520,7 +1520,7 @@ function App() {
                       step="0.1"
                       min="0"
                       inputMode="decimal"
-                      value={thresholds.spreadMaxPct ?? ''}
+                      value={draftThresholds.spreadMaxPct ?? ''}
                       aria-describedby={getError('spreadMaxPct') ? 'spread-max-error' : undefined}
                       onChange={(e) => {
                         const nextValue = parseNumberInput(e);
@@ -1547,7 +1547,7 @@ function App() {
                     <input
                       id="need-ema-200"
                       type="checkbox"
-                      checked={thresholds.needEMA200}
+                      checked={draftThresholds.needEMA200}
                       onChange={(e) => setThresholds((prev) => ({ ...prev, needEMA200: e.target.checked }))}
                     />
                     <span id="need-ema-200-label">Requerir precio &gt; EMA200</span>
@@ -1556,7 +1556,7 @@ function App() {
                     <input
                       id="mode-parabolic"
                       type="checkbox"
-                      checked={thresholds.parabolic50}
+                      checked={draftThresholds.parabolic50}
                       onChange={(e) => setThresholds((prev) => ({ ...prev, parabolic50: e.target.checked }))}
                     />
                     <span id="mode-parabolic-label">Modo parabólico (≥ 50%)</span>
