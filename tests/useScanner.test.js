@@ -35,7 +35,7 @@ test('scanUniverse filters matches based on required flags', async () => {
     marketBySymbol,
   });
 
-  const { matches, error, coverage } = await scanUniverse({ enabledMarkets, calc, fetcher });
+  const { matches, error, coverage } = await scanUniverse({ enabledMarkets, calc, thresholds, fetcher });
   assert.equal(error, null);
   assert.ok(matches.length > 0);
   assert.ok(matches.every((entry) => entry.computed.flags.priceOK));
@@ -48,6 +48,7 @@ test('scanUniverse returns empty array when markets disabled', async () => {
   const result = await scanUniverse({
     enabledMarkets: [],
     calc,
+    thresholds,
     fetcher: async () => ({ quotes: {}, error: null, coverage: { totalRequested: 0, totalFetched: 0, ratio: 1, alert: false } }),
   });
   assert.equal(result.matches.length, 0);
@@ -65,6 +66,6 @@ test('scanUniverse propaga alerta de cobertura baja', async () => {
     error: null,
     coverage: { totalRequested: symbols.length, totalFetched: 1, ratio: 1 / symbols.length, alert: true },
   });
-  const result = await scanUniverse({ enabledMarkets, calc, fetcher, coverageThreshold: 0.9 });
+  const result = await scanUniverse({ enabledMarkets, calc, thresholds, fetcher, coverageThreshold: 0.9 });
   assert.equal(result.coverage.alert, true);
 });
