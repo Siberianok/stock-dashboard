@@ -23,15 +23,117 @@ const numberField = ({ min, max, messageMin, messageMax } = {}) => {
   return schema;
 };
 
+const scalarFieldConstraints = {
+  rvolMin: { min: 0, messageMin: numericMessages.minZero },
+  rvolIdeal: { min: 0, messageMin: numericMessages.minZero },
+  atrMin: { min: 0, messageMin: numericMessages.minZero },
+  atrPctMin: { min: 0, messageMin: numericMessages.minZero },
+  chgMin: { min: 0, messageMin: numericMessages.minZero },
+  float50: { min: 0, messageMin: numericMessages.minZero },
+  float10: { min: 0, messageMin: numericMessages.minZero },
+  rotationMin: { min: 0, messageMin: numericMessages.minZero },
+  rotationIdeal: { min: 0, messageMin: numericMessages.minZero },
+  shortMin: { min: 0, max: 100, messageMin: numericMessages.minZero, messageMax: numericMessages.maxHundred },
+  spreadMaxPct: { min: 0, messageMin: numericMessages.minZero },
+};
+
+export const THRESHOLD_FIELD_VALIDATIONS = {
+  marketsEnabled: {
+    path: ['marketsEnabled', ':market'],
+    type: 'boolean',
+    description: 'Interruptor que habilita o deshabilita un mercado concreto.',
+  },
+  priceRangeMin: {
+    path: ['priceRange', ':market', 'min'],
+    type: 'number',
+    constraints: { min: 0, messageMin: numericMessages.minZero },
+    relations: [
+      {
+        type: 'lte',
+        field: 'priceRangeMax',
+        message: 'Debe ser ≤ máximo',
+        scope: 'market',
+      },
+    ],
+  },
+  priceRangeMax: {
+    path: ['priceRange', ':market', 'max'],
+    type: 'number',
+    constraints: { min: 0, messageMin: numericMessages.minZero },
+    relations: [
+      {
+        type: 'gte',
+        field: 'priceRangeMin',
+        message: 'Debe ser ≥ mínimo',
+        scope: 'market',
+      },
+    ],
+  },
+  liquidityMin: {
+    path: ['liquidityMin', ':market'],
+    type: 'number',
+    constraints: { min: 0, messageMin: numericMessages.minZero },
+  },
+  parabolic50: {
+    path: ['parabolic50'],
+    type: 'boolean',
+    description: 'Alterna el modo parabólico basado en el 50%.',
+  },
+  needEMA200: {
+    path: ['needEMA200'],
+    type: 'boolean',
+    description: 'Requiere que el precio cotice por encima de la EMA200.',
+  },
+  ...Object.fromEntries(
+    Object.entries(scalarFieldConstraints).map(([field, constraints]) => [
+      field,
+      {
+        path: [field],
+        type: 'number',
+        constraints,
+        relations:
+          field === 'rvolIdeal'
+            ? [
+                {
+                  type: 'gte',
+                  field: 'rvolMin',
+                  message: 'Debe ser ≥ rvolMin',
+                },
+              ]
+            : field === 'float10'
+              ? [
+                  {
+                    type: 'lte',
+                    field: 'float50',
+                    message: 'Debe ser ≤ float50',
+                  },
+                ]
+              : field === 'rotationIdeal'
+                ? [
+                    {
+                      type: 'gte',
+                      field: 'rotationMin',
+                      message: 'Debe ser ≥ rotationMin',
+                    },
+                  ]
+                : undefined,
+      },
+    ]),
+  ),
+};
+
+const priceRangeMinMessage = THRESHOLD_FIELD_VALIDATIONS.priceRangeMin.relations?.[0]?.message || 'Debe ser ≤ máximo';
+const priceRangeMaxMessage = THRESHOLD_FIELD_VALIDATIONS.priceRangeMax.relations?.[0]?.message || 'Debe ser ≥ mínimo';
+
 const priceRangeSchema = z
   .object({
-    min: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    max: numberField({ min: 0, messageMin: numericMessages.minZero }),
+    min: numberField(THRESHOLD_FIELD_VALIDATIONS.priceRangeMin.constraints),
+    max: numberField(THRESHOLD_FIELD_VALIDATIONS.priceRangeMax.constraints),
   })
   .superRefine((value, ctx) => {
     if (typeof value.min === 'number' && typeof value.max === 'number' && value.min > value.max) {
-      ctx.addIssue({ path: ['min'], message: 'Debe ser ≤ máximo' });
-      ctx.addIssue({ path: ['max'], message: 'Debe ser ≥ mínimo' });
+      ctx.addIssue({ path: ['min'], message: priceRangeMinMessage });
+      ctx.addIssue({ path: ['max'], message: priceRangeMaxMessage });
     }
   });
 
@@ -46,19 +148,11 @@ export const filterThresholdSchema = z
     marketsEnabled: marketsEnabledSchema,
     priceRange: priceRangeRecordSchema,
     liquidityMin: liquiditySchema,
-    rvolMin: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    rvolIdeal: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    atrMin: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    atrPctMin: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    chgMin: numberField({ min: 0, messageMin: numericMessages.minZero }),
+    ...Object.fromEntries(
+      Object.entries(scalarFieldConstraints).map(([field, constraints]) => [field, numberField(constraints)]),
+    ),
     parabolic50: z.boolean(),
     needEMA200: z.boolean(),
-    float50: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    float10: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    rotationMin: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    rotationIdeal: numberField({ min: 0, messageMin: numericMessages.minZero }),
-    shortMin: numberField({ min: 0, max: 100, messageMin: numericMessages.minZero, messageMax: numericMessages.maxHundred }),
-    spreadMaxPct: numberField({ min: 0, messageMin: numericMessages.minZero }),
   })
   .superRefine((data, ctx) => {
     if (typeof data.rvolIdeal === 'number' && typeof data.rvolMin === 'number' && data.rvolIdeal < data.rvolMin) {

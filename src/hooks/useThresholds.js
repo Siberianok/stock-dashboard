@@ -157,6 +157,32 @@ export const withDraftApply = (state, { label, timestamp = now() } = {}) => {
   };
 };
 
+export const withUndo = (state, { timestamp = now() } = {}) => {
+  if (!Array.isArray(state.history) || state.history.length === 0) {
+    return { state, undone: false, restoredAt: timestamp };
+  }
+  const lastSnapshot = state.history[state.history.length - 1];
+  if (!lastSnapshot) {
+    return { state, undone: false, restoredAt: timestamp };
+  }
+  const restored = normalizeThresholds(lastSnapshot.thresholds);
+  const nextHistory = state.history.slice(0, -1);
+  const draft = {
+    thresholds: cloneThresholds(restored),
+    savedAt: timestamp,
+    updatedAt: timestamp,
+  };
+  return {
+    state: {
+      thresholds: cloneThresholds(restored),
+      history: nextHistory,
+      draft,
+    },
+    undone: true,
+    restoredAt: timestamp,
+  };
+};
+
 export function useThresholds() {
   const [state, setState] = useState(() => cloneState(loadThresholdState()));
 
@@ -240,27 +266,7 @@ export function useThresholds() {
   }, []);
 
   const undo = useCallback(() => {
-    setState((prevState) => {
-      if (!prevState.history.length) {
-        return prevState;
-      }
-      const nextHistory = prevState.history.slice(0, -1);
-      const lastSnapshot = prevState.history[prevState.history.length - 1];
-      if (!lastSnapshot) {
-        return prevState;
-      }
-      const restored = normalizeThresholds(lastSnapshot.thresholds);
-      const timestamp = now();
-      return {
-        thresholds: cloneThresholds(restored),
-        history: nextHistory,
-        draft: {
-          thresholds: cloneThresholds(restored),
-          savedAt: timestamp,
-          updatedAt: timestamp,
-        },
-      };
-    });
+    setState((prevState) => withUndo(prevState).state);
   }, []);
 
   const pushSnapshot = useCallback((label) => {
