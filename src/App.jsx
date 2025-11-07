@@ -60,11 +60,28 @@ const TIME_RANGE_LABELS = {
   ALL: 'todo el historial',
 };
 
-const TooltipCard = ({ title, subtitle, children }) => (
-  <div className={`rounded-xl ${COLORS.glass} p-3 text-xs space-y-1 min-w-[160px]`}>
+const TooltipCard = ({ title, subtitle, items = [], children }) => (
+  <div className={`rounded-xl ${COLORS.glass} p-3 text-xs space-y-1 min-w-[180px]`}>
     {title ? <div className="font-semibold text-white">{title}</div> : null}
     {subtitle ? <div className="text-[11px] text-white/60">{subtitle}</div> : null}
-    <div className="space-y-1 text-white/80">{children}</div>
+    {items.length ? (
+      <dl className="space-y-1 text-white/80">
+        {items.map(({ key, label, value }) => (
+          <div key={key || label} className="flex items-start justify-between gap-3">
+            <dt className="text-white/70">{label}</dt>
+            <dd className="font-semibold text-white text-right flex-1">
+              {typeof value === 'string' || typeof value === 'number' ? (
+                <span className="block">{value}</span>
+              ) : (
+                value
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    ) : (
+      <div className="space-y-1 text-white/80">{children}</div>
+    )}
   </div>
 );
 
@@ -74,16 +91,14 @@ const ScoreDistributionTooltip = ({ active, payload, total, timeRange }) => {
   if (!item) return null;
   const share = total ? Math.round(((item.value || 0) / total) * 1000) / 10 : 0;
   return (
-    <TooltipCard title={item.name} subtitle={TIME_RANGE_LABELS[timeRange] || ''}>
-      <div className="flex items-center justify-between">
-        <span>Tickers</span>
-        <span className="font-semibold text-white">{item.value}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span>Participación</span>
-        <span className="font-semibold text-white">{share.toFixed(1)}%</span>
-      </div>
-    </TooltipCard>
+    <TooltipCard
+      title={item.name}
+      subtitle={`Rango temporal: ${TIME_RANGE_LABELS[timeRange] || 'sin rango'}`}
+      items={[
+        { key: 'count', label: 'Cantidad de tickers', value: safeInteger(item.value) },
+        { key: 'share', label: 'Participación en el período', value: `${safeNumber(share, 1)}%` },
+      ]}
+    />
   );
 };
 
@@ -95,12 +110,23 @@ const SankeyTooltip = ({ active, payload, timeRange }) => {
   const source = link.source?.name || '';
   const target = link.target?.name || '';
   return (
-    <TooltipCard title={`${source} → ${target}`} subtitle={TIME_RANGE_LABELS[timeRange] || ''}>
-      <div className="flex items-center justify-between">
-        <span>Tickers</span>
-        <span className="font-semibold text-white">{item.value}</span>
-      </div>
-    </TooltipCard>
+    <TooltipCard
+      title={`${source || 'Sin origen'} → ${target || 'Sin destino'}`}
+      subtitle={`Rango temporal: ${TIME_RANGE_LABELS[timeRange] || 'sin rango'}`}
+      items={[
+        {
+          key: 'source',
+          label: 'Origen',
+          value: <span className="block text-right">{source || 'Sin origen'}</span>,
+        },
+        {
+          key: 'target',
+          label: 'Destino',
+          value: <span className="block text-right">{target || 'Sin destino'}</span>,
+        },
+        { key: 'count', label: 'Cantidad de tickers', value: safeInteger(item.value) },
+      ]}
+    />
   );
 };
 
@@ -201,18 +227,15 @@ const RadarTooltip = ({ active, payload }) => {
   const item = payload[0]?.payload;
   if (!item) return null;
   return (
-    <TooltipCard title={item.k}>
-      <div className="flex items-center justify-between">
-        <span>Puntaje</span>
-        <span className="font-semibold text-white">{fmt(item.v, 0)}%</span>
-      </div>
-      {item.raw !== undefined ? (
-        <div className="flex items-center justify-between">
-          <span>Valor</span>
-          <span className="font-semibold text-white">{fmt(item.raw, 2)}</span>
-        </div>
-      ) : null}
-    </TooltipCard>
+    <TooltipCard
+      title={item.k}
+      items={[
+        { key: 'score', label: 'Puntaje relativo', value: `${safeNumber(item.v, 0)}%` },
+        ...(item.raw !== undefined
+          ? [{ key: 'raw', label: 'Valor actual', value: safeNumber(item.raw, 2) }]
+          : []),
+      ]}
+    />
   );
 };
 
@@ -622,6 +645,8 @@ function App() {
 
   const [metrics, setMetrics] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const diagnosticsRegionId = useId();
 
   useEffect(() => {
     const unsubscribeMetrics = subscribeToMetrics(setMetrics);
@@ -630,6 +655,18 @@ function App() {
       unsubscribeMetrics();
       unsubscribeLogs();
     };
+  }, []);
+
+  const hasDiagnosticsData = metrics.length > 0 || logs.length > 0;
+
+  useEffect(() => {
+    if (hasDiagnosticsData) {
+      setShowDiagnostics((prev) => (prev ? prev : true));
+    }
+  }, [hasDiagnosticsData]);
+
+  const toggleDiagnosticsPanel = useCallback(() => {
+    setShowDiagnostics((prev) => !prev);
   }, []);
 
   const computedRows = useMemo(
@@ -1910,7 +1947,26 @@ function App() {
           </div>
         ) : null}
 
-        <DiagnosticsPanel metrics={metrics} logs={logs} />
+        {hasDiagnosticsData ? (
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-3 text-xs text-white/70">
+            <span>
+              Diagnósticos en vivo: {metrics.length} métricas · {logs.length} eventos
+            </span>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition"
+              onClick={toggleDiagnosticsPanel}
+              aria-expanded={showDiagnostics}
+              aria-controls={diagnosticsRegionId}
+            >
+              {showDiagnostics ? 'Ocultar panel de diagnósticos' : 'Mostrar panel de diagnósticos'}
+            </button>
+          </div>
+        ) : null}
+
+        {hasDiagnosticsData && showDiagnostics ? (
+          <DiagnosticsPanel metrics={metrics} logs={logs} regionId={diagnosticsRegionId} />
+        ) : null}
 
         <div className="mt-4 text-xs text-white/70 text-center">
           <p>Tips: Seleccioná el mercado para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>

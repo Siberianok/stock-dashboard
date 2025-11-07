@@ -53,6 +53,21 @@ Antes de publicar una nueva versión revisá:
 - Confirmá en la consola del navegador que las peticiones a `https://query1.finance.yahoo.com/v7/finance/quote` devuelven 200 o, en caso contrario, que el modo simulado se activa.
 - En GitHub Pages, revisá que no haya 404 en los assets: el `base` de Vite (`/stock-dashboard/`) debe coincidir con la URL publicada.
 
+## Panel de diagnósticos
+
+El dashboard incluye un panel colapsable de diagnósticos que concentra la telemetría del fetcher y los mensajes de error importantes.
+
+1. Usá el botón **Mostrar panel de diagnósticos** (aparece apenas haya datos de telemetría) para desplegarlo. El mismo botón permite ocultarlo y expone el estado expandido mediante `aria-expanded` para lectores de pantalla.
+2. La columna **Métricas recientes** lista las últimas 5 consultas ejecutadas, indicando:
+   - Identificador de la petición (por ejemplo `quotes.live`).
+   - Cantidad de símbolos recuperados vs solicitados.
+   - Latencia total (`durationMs`).
+   - Tamaño de la respuesta (`payloadSize`).
+   - Resultado (`OK` cuando la API respondió correctamente, `Atención` cuando hubo reintentos o errores).
+3. La columna **Errores recientes** muestra los últimos 5 eventos críticos registrados por el logger. Cada entrada especifica el contexto (`context`), el mensaje human readable y, si aplica, el listado de símbolos afectado. La marca de tiempo usa hora local con precisión a segundos.
+
+Este panel funciona como guía rápida para interpretar problemas de conectividad (payloads vacíos, respuestas lentas) y validar que los reintentos automáticos se están ejecutando. Al estar integrado en el flujo principal y anunciar actualizaciones mediante regiones vivas (`aria-live`), se puede seguir la salud del fetch sin abandonar el dashboard.
+
 ## Estructura
 
 ```
