@@ -1,9 +1,16 @@
 module.exports = {
+  root: true,
   env: {
     browser: true,
     es2021: true,
   },
-  extends: ['eslint:recommended', 'plugin:react/recommended', 'plugin:jsx-a11y/recommended'],
+  extends: [
+    'eslint:recommended',
+    'plugin:react/recommended',
+    'plugin:react-hooks/recommended',
+    'plugin:jsx-a11y/recommended',
+    'prettier',
+  ],
   parserOptions: {
     ecmaFeatures: {
       jsx: true,
@@ -16,10 +23,26 @@ module.exports = {
       version: 'detect',
     },
   },
-  plugins: ['react', 'jsx-a11y'],
+  plugins: ['react', 'react-hooks', 'jsx-a11y'],
+  ignorePatterns: ['dist', 'coverage'],
   rules: {
     'react/react-in-jsx-scope': 'off',
     'react/prop-types': 'off',
   },
-  ignorePatterns: ['dist', 'node_modules'],
+  overrides: [
+    {
+      files: ['tests/**/*.test.js'],
+      env: {
+        node: true,
+      },
+      globals: {
+        test: 'readonly',
+        expect: 'readonly',
+        describe: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        vi: 'readonly',
+      },
+    },
+  ],
 };
