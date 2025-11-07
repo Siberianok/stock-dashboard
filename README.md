@@ -2,31 +2,50 @@
 
 Dashboard visual (checklist + scoring + gráficos) para filtrar candidatas momentum/parabólicas.
 
-## Live (GitHub Pages)
-Este repo usa **GitHub Pages**. Hay dos formas de publicar:
-- **Con GitHub Actions (recomendado aquí):** cada `push` a `main` despliega automático.
-- **Deploy from a branch (simple):** seleccionar `gh-pages` (o la rama que definas) y apuntar al contenido compilado.
+## Entorno productivo
 
-Pasos mínimos para un deploy manual:
+- **URL principal:** [`https://<usuario>.github.io/stock-dashboard/`](https://<usuario>.github.io/stock-dashboard/)
+- **Workflow de despliegue:** [`Deploy dashboard to GitHub Pages`](.github/workflows/deploy.yml)
+- **Monitorización:** [`Pages health check`](.github/workflows/pages-healthcheck.yml) (ejecución horaria con `curl --fail`).
 
-1. Ejecutar `npm run build` para generar la carpeta `dist/`.
-2. Subir el contenido de `dist/` a la rama configurada en Pages.
-3. Confirmar que la URL final respete el `base` configurado en `vite.config.js` (`/stock-dashboard/`).
+> Reemplazá `<usuario>` por la organización o usuario dueño del repositorio una vez configurado GitHub Pages.
 
-### Deploy automático (recomendado)
+## Configuración de GitHub Pages
+
+1. Abrí **Settings → Pages** y definí `Source: GitHub Actions` para que los despliegues provengan del workflow.
+2. Confirmá que exista el entorno `github-pages` y que `main` esté autorizado como rama de despliegue.
+3. Opcional: agregá reviewers, secretos o variables necesarias en el entorno para integraciones externas.
+4. Revisá la pestaña **Deployments** tras cada ejecución para validar la URL final que entrega `actions/deploy-pages`.
+
+La configuración completa (incluyendo fallback manual y rollback) está detallada en [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+## Deploy automático (recomendado)
+
 - Cada `push` a `main` ejecuta el workflow [`Deploy dashboard to GitHub Pages`](.github/workflows/deploy.yml).
-- El workflow instala dependencias, corre los tests y compila la `dist/` con Vite.
-- El artefacto compilado se publica en la rama interna de Pages mediante `actions/deploy-pages`.
-- Asegurate de tener activado GitHub Pages en **Settings → Pages** con `Source: GitHub Actions`.
+- El workflow instala dependencias (`npm ci`), corre los tests (`npm test`), compila la `dist/` con Vite (`npm run build`) y publica el artefacto con `actions/deploy-pages`.
+- Al finalizar, el job `deploy` asocia el resultado al entorno `github-pages` para facilitar aprobaciones y seguimiento.
 
-### Deploy manual (fallback)
-Si querés un deploy manual:
+## Deploy manual y rollback
 
-1. Ejecutá `npm run build` para generar la carpeta `dist/`.
-2. Subí el contenido de `dist/` a la rama configurada en Pages (por ejemplo `gh-pages` o `docs/`).
-3. Confirmá que la URL final respete el `base` configurado en `vite.config.js` (`/stock-dashboard/`).
+### Fallback manual rápido
 
-URL esperada: `https://<usuario>.github.io/<repo>/`
+1. Ejecutá `npm ci` y `npm run build` localmente.
+2. Copiá el contenido de `dist/` a una rama publicada (por ejemplo `gh-pages`).
+3. En **Settings → Pages**, cambiá `Source` a `Deploy from a branch` y elegí la rama/carpeta correcta.
+4. Validá la URL pública y, cuando termine la contingencia, regresá a `Source: GitHub Actions`.
+
+### Procedimiento de rollback
+
+1. Identificá el commit estable (en `git log` o desde **Deployments → History**).
+2. Ejecutá `git revert <commit>` o creá una rama `rollback/<fecha>` basada en ese commit.
+3. Abrí un pull request hacia `main` y esperá a que el workflow de deploy publique la versión revertida.
+4. Como alternativa inmediata, generá `dist/` desde el commit estable y desplegalo usando el fallback manual.
+
+## Monitorización y alertas
+
+- El workflow [`Pages health check`](.github/workflows/pages-healthcheck.yml) se ejecuta cada hora y falla si `curl` no obtiene respuesta 2xx/3xx.
+- Los fallos del health check o del deploy quedan registrados en Actions, lo que habilita notificaciones de GitHub (email/web) según tu configuración.
+- Podés suscribirte a la vista **Actions → Notifications** para recibir alertas en caso de problemas.
 
 ## Desarrollo local
 
