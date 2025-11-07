@@ -1,4 +1,5 @@
 import { generateMockQuotes as defaultGenerateMockQuotes } from './mockQuotes.js';
+import { logError } from '../utils/logger.js';
 
 const CACHE_TTL = 30_000;
 const MAX_SYMBOLS_PER_REQUEST = 50;
@@ -114,6 +115,8 @@ const isCircuitOpen = () => circuitState.openUntil && Date.now() < circuitState.
 
 const circuitRemainingMs = () => Math.max(0, circuitState.openUntil - Date.now());
 
+/* eslint-disable no-console */
+
 const fetchChunk = async (symbols, { signal } = {}) => {
   const sortedSymbols = symbols.slice().sort();
   const joined = encodeURIComponent(sortedSymbols.join(','));
@@ -158,6 +161,18 @@ const fetchChunk = async (symbols, { signal } = {}) => {
   }
 };
 
+const logFetchEvent = (level, message, extra = {}) => {
+  const payload = { ...extra };
+  if (typeof console === 'undefined') return;
+  if (level === 'warn' && console.warn) {
+    console.warn(`[fetchQuotes] ${message}`, payload);
+  } else if (level === 'info' && console.info) {
+    console.info(`[fetchQuotes] ${message}`, payload);
+  } else if (level === 'debug' && console.debug) {
+    console.debug(`[fetchQuotes] ${message}`, payload);
+  }
+};
+
 export const fetchQuotes = async (
   inputSymbols,
   { force = false, signal, marketBySymbol = {}, mode = 'live', generateMockQuotes } = {},
@@ -179,6 +194,8 @@ export const fetchQuotes = async (
   const fallbackBySymbol = {};
   const processedSymbols = new Set();
 
+  const cacheHits = [];
+
   symbols.forEach((symbol) => {
     const market = resolveMarket(symbol, marketBySymbol);
     const cacheKey = getCacheKey(symbol, market);
@@ -189,10 +206,15 @@ export const fetchQuotes = async (
     if (!force && cached && now - cached.timestamp <= CACHE_TTL) {
       freshQuotes[symbol] = cached.data;
       processedSymbols.add(symbol);
+      cacheHits.push(symbol);
     } else {
       missing.push(symbol);
     }
   });
+
+  if (cacheHits.length) {
+    logFetchEvent('info', 'cache-hit', { symbols: cacheHits });
+  }
 
   const staleSymbols = new Set();
   const invalidSymbols = new Set();
@@ -205,42 +227,54 @@ export const fetchQuotes = async (
     circuitTriggered = true;
   }
 
-  const handleFallback = (symbol) => {
+  const handleFallback = (symbol, reason) => {
     const fallback = fallbackBySymbol[symbol];
     if (fallback) {
       freshQuotes[symbol] = { ...fallback };
       processedSymbols.add(symbol);
       staleSymbols.add(symbol);
+      logFetchEvent('warn', 'using-fallback', { symbol, reason });
+    } else {
+      logFetchEvent('warn', 'fallback-unavailable', { symbol, reason });
     }
   };
 
   if (mode === 'mock' && missing.length) {
     const generator = typeof generateMockQuotes === 'function' ? generateMockQuotes : defaultGenerateMockQuotes;
     if (!generator) {
-      console.warn('Modo simulado activo pero no se proporcionó generateMockQuotes.');
+      logFetchEvent('warn', 'mock-generator-missing');
     }
     if (generator) {
-      const mocked = await generator(missing, { marketBySymbol });
-      missing.forEach((symbol) => {
-        const quote = mocked?.[symbol];
-        if (!quote) {
-          invalidSymbols.add(symbol);
-          handleFallback(symbol);
-          return;
-        }
-        const { valid, quote: sanitized } = sanitizeQuote({ ...quote, symbol });
-        if (!valid) {
-          invalidSymbols.add(symbol);
-          handleFallback(symbol);
-          return;
-        }
-        const market = resolveMarket(symbol, marketBySymbol);
-        const cacheKey = getCacheKey(symbol, market);
-        cache.set(cacheKey, { timestamp: Date.now(), data: sanitized });
-        freshQuotes[symbol] = sanitized;
-        processedSymbols.add(symbol);
-      });
-      registerSuccess();
+      try {
+        const mocked = await generator(missing, { marketBySymbol });
+        missing.forEach((symbol) => {
+          const quote = mocked?.[symbol];
+          if (!quote) {
+            invalidSymbols.add(symbol);
+            handleFallback(symbol, 'mock-missing');
+            return;
+          }
+          const { valid, quote: sanitized } = sanitizeQuote({ ...quote, symbol });
+          if (!valid) {
+            invalidSymbols.add(symbol);
+            handleFallback(symbol, 'mock-invalid');
+            return;
+          }
+          const market = resolveMarket(symbol, marketBySymbol);
+          const cacheKey = getCacheKey(symbol, market);
+          cache.set(cacheKey, { timestamp: Date.now(), data: sanitized });
+          freshQuotes[symbol] = sanitized;
+          processedSymbols.add(symbol);
+        });
+        registerSuccess();
+        logFetchEvent('info', 'mock-success', { symbols: missing });
+      } catch (error) {
+        logError('fetchQuotes.mock', error, { symbols: missing });
+        failedSymbols.push(...missing);
+        missing.forEach((symbol) => {
+          handleFallback(symbol, 'mock-error');
+        });
+      }
     }
   } else if (missing.length && !circuitTriggered) {
     const chunkTasks = [];
@@ -263,7 +297,13 @@ export const fetchQuotes = async (
       if (result?.status === 'fulfilled') {
         anySuccess = true;
         const found = new Set();
-        const { quotes: rawQuotes } = result.value;
+        const { quotes: rawQuotes, metrics } = result.value;
+        logFetchEvent('info', 'chunk-success', {
+          symbols: chunkSymbols,
+          attempts: metrics?.attempts,
+          durationMs: metrics?.duration,
+          payloadSize: metrics?.payloadSize,
+        });
         rawQuotes.forEach((rawQuote) => {
           const symbol = normalizeSymbol(rawQuote?.symbol);
           if (!symbol) {
@@ -273,7 +313,7 @@ export const fetchQuotes = async (
           const { valid, quote } = sanitizeQuote(rawQuote);
           if (!valid) {
             invalidSymbols.add(symbol);
-            handleFallback(symbol);
+            handleFallback(symbol, 'live-invalid');
             return;
           }
           const market = resolveMarket(symbol, marketBySymbol);
@@ -285,7 +325,7 @@ export const fetchQuotes = async (
         chunkSymbols.forEach((symbol) => {
           if (!found.has(symbol)) {
             failedSymbols.push(symbol);
-            handleFallback(symbol);
+            handleFallback(symbol, 'live-missing');
           }
         });
       } else {
@@ -295,26 +335,30 @@ export const fetchQuotes = async (
           rateLimitHit = true;
           suggestedRetrySeconds = reason.retryAfter;
           registerFailure();
+          logError('fetchQuotes.rateLimit', reason, { symbols: chunkSymbols, retryAfter: reason.retryAfter });
         } else if (reason?.name === 'AbortError') {
           // caller cancelled
         } else {
           registerFailure();
           if (reason) {
-            console.error(`Error al obtener cotizaciones para ${chunkSymbols.join(', ')}`, reason);
+            logError('fetchQuotes.chunk', reason, { symbols: chunkSymbols });
           }
         }
         chunkSymbols.forEach((symbol) => {
-          handleFallback(symbol);
+          handleFallback(symbol, reason instanceof RateLimitError ? 'rate-limit' : reason?.name || 'live-error');
         });
       }
     });
 
     if (anySuccess) {
       registerSuccess();
+    } else {
+      logFetchEvent('warn', 'live-misses-all', { symbols: missing });
     }
   } else if (missing.length && circuitTriggered) {
+    logFetchEvent('warn', 'circuit-open', { symbols: missing, reopenInMs: circuitRemainingMs() });
     missing.forEach((symbol) => {
-      handleFallback(symbol);
+      handleFallback(symbol, 'circuit');
     });
   }
 
