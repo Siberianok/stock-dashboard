@@ -393,6 +393,8 @@ function App() {
 
   const [metrics, setMetrics] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const diagnosticsRegionId = useId();
 
   useEffect(() => {
     const unsubscribeMetrics = subscribeToMetrics(setMetrics);
@@ -401,6 +403,18 @@ function App() {
       unsubscribeMetrics();
       unsubscribeLogs();
     };
+  }, []);
+
+  const hasDiagnosticsData = metrics.length > 0 || logs.length > 0;
+
+  useEffect(() => {
+    if (hasDiagnosticsData) {
+      setShowDiagnostics((prev) => (prev ? prev : true));
+    }
+  }, [hasDiagnosticsData]);
+
+  const toggleDiagnosticsPanel = useCallback(() => {
+    setShowDiagnostics((prev) => !prev);
   }, []);
 
   const computedRows = useMemo(
@@ -1634,7 +1648,26 @@ function App() {
           </div>
         ) : null}
 
-        <DiagnosticsPanel metrics={metrics} logs={logs} />
+        {hasDiagnosticsData ? (
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-3 text-xs text-white/70">
+            <span>
+              Diagnósticos en vivo: {metrics.length} métricas · {logs.length} eventos
+            </span>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition"
+              onClick={toggleDiagnosticsPanel}
+              aria-expanded={showDiagnostics}
+              aria-controls={diagnosticsRegionId}
+            >
+              {showDiagnostics ? 'Ocultar panel de diagnósticos' : 'Mostrar panel de diagnósticos'}
+            </button>
+          </div>
+        ) : null}
+
+        {hasDiagnosticsData && showDiagnostics ? (
+          <DiagnosticsPanel metrics={metrics} logs={logs} regionId={diagnosticsRegionId} />
+        ) : null}
 
         <div className="mt-4 text-xs text-white/70 text-center">
           <p>Tips: Seleccioná el mercado para aplicar los umbrales correctos. Rotación = VolHoy / (Float * 1e6). ATR% = ATR14 / Close * 100. %día = (Close - Open)/Open*100.</p>
