@@ -1,0 +1,34 @@
+name: Pages health check
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check:
+    name: Verify production availability
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve GitHub Pages URL
+        id: url
+        run: |
+          REPO="${GITHUB_REPOSITORY}"
+          OWNER="${REPO%%/*}"
+          NAME="${REPO##*/}"
+          URL="https://${OWNER}.github.io/${NAME}/"
+          echo "pages_url=${URL}" >> "$GITHUB_OUTPUT"
+      - name: Health check request
+        env:
+          PAGES_URL: ${{ steps.url.outputs.pages_url }}
+        run: |
+          echo "Checking ${PAGES_URL}"
+          curl --retry 3 --retry-all-errors --silent --show-error --fail "${PAGES_URL}" > /dev/null
+      - name: Record status
+        env:
+          PAGES_URL: ${{ steps.url.outputs.pages_url }}
+        run: echo "GitHub Pages responded successfully at ${PAGES_URL}"
