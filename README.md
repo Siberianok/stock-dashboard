@@ -43,6 +43,21 @@ El build de producción se genera con:
 npm run build
 ```
 
+## Gestión de umbrales (thresholds)
+
+- **Reset completo:** ejecutá `localStorage.removeItem('selector.thresholds')` en la consola del navegador o llamá a
+  `persistThresholdState({ thresholds: DEFAULT_THRESHOLDS, history: [] })` desde un script. Ambos caminos generan un estado
+  limpio que repuebla la aplicación con los valores de `DEFAULT_THRESHOLDS` y reinicia el borrador.
+- **Mapeo de validaciones:** cualquier campo editable del formulario está descrito en
+  `THRESHOLD_FIELD_VALIDATIONS` (`src/validation/filterRules.js`). Esta estructura documenta tipo, límites y reglas cruzadas
+  y debe actualizarse al agregar nuevos inputs.
+- **Agregar una migración:** incrementá `CURRENT_VERSION` en `thresholdStorage.js`, agregá una función `migrateToV<N>` que
+  normalice los datos antiguos y encadenala dentro de `applyMigrations`. Acompañá el cambio con un test en `tests/` que cargue
+  un payload de la versión anterior y confirme que `loadThresholdState()` entrega el nuevo formato.
+- **Verificación rápida:** luego de ajustar reglas o migraciones, corré `npm test`. Los casos en
+  `tests/filterRules.test.js` y `tests/thresholdDrafts.test.js` cubren los flujos de edición, presets, undo y almacenamiento
+  persistente.
+
 ## Checklist de verificación rápida
 
 Antes de publicar una nueva versión revisá:

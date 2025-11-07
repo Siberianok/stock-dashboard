@@ -159,6 +159,119 @@ test('fetchQuotes usa modo simulado cuando se solicita', async () => {
   }
 });
 
+test('fetchQuotes recurre a fallback del cache cuando la red falla', async () => {
+  clearCache();
+  const warnings = [];
+  const errors = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.warn = (...args) => { warnings.push(args.map(String)); };
+  console.error = (...args) => { errors.push(args.map(String)); };
+
+  const successResponse = {
+    ok: true,
+    status: 200,
+    headers: new Map(),
+    json: async () => ({
+      quoteResponse: {
+        result: [
+          {
+            symbol: 'MSFT',
+            regularMarketPrice: 10,
+            regularMarketOpen: 9,
+            regularMarketVolume: 1_000_000,
+          },
+        ],
+      },
+    }),
+  };
+
+  let call = 0;
+  global.fetch = async () => {
+    if (call === 0) {
+      call += 1;
+      return successResponse;
+    }
+    call += 1;
+    return {
+      ok: false,
+      status: 500,
+      headers: new Map(),
+      json: async () => ({}),
+    };
+  };
+
+  try {
+    const first = await fetchQuotes(['MSFT']);
+    assert.equal(first.error, null);
+    assert.ok(first.quotes.MSFT);
+
+    const second = await fetchQuotes(['MSFT'], { force: true });
+    assert.ok(second.error?.includes('No se pudo actualizar'));
+    assert.ok(second.quotes.MSFT, 'fallback should provide cached quote');
+    assert.ok(second.staleSymbols.includes('MSFT'));
+    assert.ok(warnings.flat().some((entry) => entry.includes('using-fallback')));
+    assert.ok(errors.flat().some((entry) => entry.includes('fetchQuotes.chunk')));
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    clearCache();
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchQuotes maneja errores de generateMockQuotes usando fallback', async () => {
+  clearCache();
+  const warnings = [];
+  const errors = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.warn = (...args) => { warnings.push(args.map(String)); };
+  console.error = (...args) => { errors.push(args.map(String)); };
+
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: new Map(),
+    json: async () => ({
+      quoteResponse: {
+        result: [
+          {
+            symbol: 'ABC',
+            regularMarketPrice: 15,
+            regularMarketOpen: 14,
+            regularMarketVolume: 2_000_000,
+          },
+        ],
+      },
+    }),
+  });
+
+  try {
+    const seed = await fetchQuotes(['ABC']);
+    assert.equal(seed.error, null);
+
+    const { quotes, error, staleSymbols } = await fetchQuotes(['ABC'], {
+      mode: 'mock',
+      force: true,
+      generateMockQuotes: async () => {
+        throw new Error('mock failure');
+      },
+    });
+
+    assert.ok(quotes.ABC, 'fallback should return cached quote');
+    assert.ok(error?.includes('No se pudo actualizar'));
+    assert.ok(staleSymbols.includes('ABC'));
+    assert.ok(errors.flat().some((entry) => entry.includes('fetchQuotes.mock')));
+    assert.ok(warnings.flat().some((entry) => entry.includes('using-fallback')));
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    clearCache();
+    global.fetch = originalFetch;
+  }
+});
+
 test('fetchQuotes respeta concurrencia máxima', async () => {
   clearCache();
   const symbols = Array.from({ length: 120 }, (_, i) => `SYM${i}`);

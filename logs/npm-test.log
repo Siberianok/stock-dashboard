@@ -1,0 +1,303 @@
+
+> stock-dashboard@0.0.0 test
+> node --test
+
+TAP version 13
+# Subtest: createCalc memoises results per row signature
+ok 1 - createCalc memoises results per row signature
+  ---
+  duration_ms: 2.757938
+  type: 'test'
+  ...
+# Subtest: calculateKPIs summarises KPI values correctly
+ok 2 - calculateKPIs summarises KPI values correctly
+  ---
+  duration_ms: 5.971233
+  type: 'test'
+  ...
+# Subtest: calculateScoreBuckets splits scores into buckets
+ok 3 - calculateScoreBuckets splits scores into buckets
+  ---
+  duration_ms: 0.33896
+  type: 'test'
+  ...
+# Subtest: calculatePipelineCounts respects flag hierarchy
+ok 4 - calculatePipelineCounts respects flag hierarchy
+  ---
+  duration_ms: 0.495483
+  type: 'test'
+  ...
+# Subtest: buildSnapshot stores aggregates and average score
+ok 5 - buildSnapshot stores aggregates and average score
+  ---
+  duration_ms: 0.355002
+  type: 'test'
+  ...
+# Subtest: upsertSnapshot enforces uniqueness and limit
+ok 6 - upsertSnapshot enforces uniqueness and limit
+  ---
+  duration_ms: 8.904084
+  type: 'test'
+  ...
+# Subtest: filterSnapshotsByRange respects configured windows
+ok 7 - filterSnapshotsByRange respects configured windows
+  ---
+  duration_ms: 0.310988
+  type: 'test'
+  ...
+# Subtest: aggregateSnapshots averages metrics over time
+ok 8 - aggregateSnapshots averages metrics over time
+  ---
+  duration_ms: 0.836805
+  type: 'test'
+  ...
+# Subtest: buildScoreDistributionData and buildSankeyData generate chart payloads
+ok 9 - buildScoreDistributionData and buildSankeyData generate chart payloads
+  ---
+  duration_ms: 1.333458
+  type: 'test'
+  ...
+# Subtest: fetchQuotes caches results and honours force option
+    # Subtest: initial call hits network
+    ok 1 - initial call hits network
+      ---
+      duration_ms: 10.793231
+      type: 'test'
+      ...
+    # Subtest: subsequent call uses cache
+    ok 2 - subsequent call uses cache
+      ---
+      duration_ms: 0.342644
+      type: 'test'
+      ...
+    # Subtest: force option bypasses cache
+    ok 3 - force option bypasses cache
+      ---
+      duration_ms: 0.620391
+      type: 'test'
+      ...
+    1..3
+ok 10 - fetchQuotes caches results and honours force option
+  ---
+  duration_ms: 13.983424
+  type: 'test'
+  ...
+# Subtest: fetchQuotes reports rate limit gracefully
+ok 11 - fetchQuotes reports rate limit gracefully
+  ---
+  duration_ms: 1.017621
+  type: 'test'
+  ...
+# Subtest: fetchQuotes valida datos y conserva fallback
+ok 12 - fetchQuotes valida datos y conserva fallback
+  ---
+  duration_ms: 0.93418
+  type: 'test'
+  ...
+# Subtest: fetchQuotes usa modo simulado cuando se solicita
+ok 13 - fetchQuotes usa modo simulado cuando se solicita
+  ---
+  duration_ms: 1.109696
+  type: 'test'
+  ...
+# Subtest: fetchQuotes respeta concurrencia máxima
+ok 14 - fetchQuotes respeta concurrencia máxima
+  ---
+  duration_ms: 27.909998
+  type: 'test'
+  ...
+# Subtest: fetchQuotes separa cache por mercado
+ok 15 - fetchQuotes separa cache por mercado
+  ---
+  duration_ms: 1.929662
+  type: 'test'
+  ...
+# Subtest: filterThresholdSchema accepts normalized defaults
+ok 16 - filterThresholdSchema accepts normalized defaults
+  ---
+  duration_ms: 2.941246
+  type: 'test'
+  ...
+# Subtest: validateThresholdDraft returns normalized values and no errors for defaults
+ok 17 - validateThresholdDraft returns normalized values and no errors for defaults
+  ---
+  duration_ms: 2.577951
+  type: 'test'
+  ...
+# Subtest: validateThresholdDraft detects rvolIdeal below rvolMin
+ok 18 - validateThresholdDraft detects rvolIdeal below rvolMin
+  ---
+  duration_ms: 0.997487
+  type: 'test'
+  ...
+# Subtest: price range min greater than max is rejected
+ok 19 - price range min greater than max is rejected
+  ---
+  duration_ms: 0.883971
+  type: 'test'
+  ...
+# Subtest: float preferences enforce ordering
+ok 20 - float preferences enforce ordering
+  ---
+  duration_ms: 0.809531
+  type: 'test'
+  ...
+# Subtest: rotation ideal cannot drop below minimum
+ok 21 - rotation ideal cannot drop below minimum
+  ---
+  duration_ms: 2.811313
+  type: 'test'
+  ...
+# Subtest: short interest percentage is capped at 100
+ok 22 - short interest percentage is capped at 100
+  ---
+  duration_ms: 0.420818
+  type: 'test'
+  ...
+# Subtest: spread values are normalized to three decimals
+ok 23 - spread values are normalized to three decimals
+  ---
+  duration_ms: 0.305756
+  type: 'test'
+  ...
+# Subtest: createThresholdSignature produces stable key for matching subsets
+ok 24 - createThresholdSignature produces stable key for matching subsets
+  ---
+  duration_ms: 0.785107
+  type: 'test'
+  ...
+# Subtest: selectHistoricalBenchmark caches results for identical filters
+ok 25 - selectHistoricalBenchmark caches results for identical filters
+  ---
+  duration_ms: 7.764743
+  type: 'test'
+  ...
+# Subtest: selectHistoricalBenchmark reacts to aggressive filters
+ok 26 - selectHistoricalBenchmark reacts to aggressive filters
+  ---
+  duration_ms: 0.960357
+  type: 'test'
+  ...
+# Subtest: buildHistoricalComparisonDataset produces chart-friendly snapshot
+ok 27 - buildHistoricalComparisonDataset produces chart-friendly snapshot
+  ---
+  duration_ms: 1.976802
+  type: 'test'
+  ...
+# Subtest: disabling a market marks tickers as removed and persists on apply
+ok 28 - disabling a market marks tickers as removed and persists on apply
+  ---
+  duration_ms: 13.057741
+  type: 'test'
+  ...
+# Subtest: relaxing thresholds adds new tickers and reset discards draft changes
+ok 29 - relaxing thresholds adds new tickers and reset discards draft changes
+  ---
+  duration_ms: 2.33296
+  type: 'test'
+  ...
+# Subtest: preserves zero values for spread and liquidity
+ok 30 - preserves zero values for spread and liquidity
+  ---
+  duration_ms: 1.484392
+  type: 'test'
+  ...
+# Subtest: extractQuoteFields normalises volumes and liquidity
+ok 31 - extractQuoteFields normalises volumes and liquidity
+  ---
+  duration_ms: 1.687854
+  type: 'test'
+  ...
+# Subtest: draft updates do not mutate active thresholds
+ok 32 - draft updates do not mutate active thresholds
+  ---
+  duration_ms: 7.193001
+  type: 'test'
+  ...
+# Subtest: saved draft persists across reloads
+ok 33 - saved draft persists across reloads
+  ---
+  duration_ms: 1.287817
+  type: 'test'
+  ...
+# Subtest: applying draft promotes configuration and records history
+ok 34 - applying draft promotes configuration and records history
+  ---
+  duration_ms: 1.76273
+  type: 'test'
+  ...
+# Subtest: normalizeNumericValue clamps and rounds consistently
+ok 35 - normalizeNumericValue clamps and rounds consistently
+  ---
+  duration_ms: 5.947377
+  type: 'test'
+  ...
+# Subtest: normalizeThresholds merges defaults and normalizes per market values
+ok 36 - normalizeThresholds merges defaults and normalizes per market values
+  ---
+  duration_ms: 1.706647
+  type: 'test'
+  ...
+# Subtest: createSnapshot clones and timestamps thresholds
+ok 37 - createSnapshot clones and timestamps thresholds
+  ---
+  duration_ms: 0.930264
+  type: 'test'
+  ...
+# Subtest: persistThresholdState stores normalized state and trims history
+ok 38 - persistThresholdState stores normalized state and trims history
+  ---
+  duration_ms: 9.444556
+  type: 'test'
+  ...
+# Subtest: applyPresetModerado restores balanced numeric thresholds
+ok 39 - applyPresetModerado restores balanced numeric thresholds
+  ---
+  duration_ms: 1.648565
+  type: 'test'
+  ...
+# Subtest: applyPresetAgresivo enforces higher momentum requirements
+ok 40 - applyPresetAgresivo enforces higher momentum requirements
+  ---
+  duration_ms: 4.571336
+  type: 'test'
+  ...
+# Subtest: needEMA200 toggle flips emaOK flag and adjusts score immediately
+ok 41 - needEMA200 toggle flips emaOK flag and adjusts score immediately
+  ---
+  duration_ms: 1.972123
+  type: 'test'
+  ...
+# Subtest: parabolic mode switch tightens and releases chgOK flag as expected
+ok 42 - parabolic mode switch tightens and releases chgOK flag as expected
+  ---
+  duration_ms: 0.640891
+  type: 'test'
+  ...
+# Subtest: scanUniverse filters matches based on required flags
+ok 43 - scanUniverse filters matches based on required flags
+  ---
+  duration_ms: 8.141363
+  type: 'test'
+  ...
+# Subtest: scanUniverse returns empty array when markets disabled
+ok 44 - scanUniverse returns empty array when markets disabled
+  ---
+  duration_ms: 0.338528
+  type: 'test'
+  ...
+# Subtest: scanUniverse propaga alerta de cobertura baja
+ok 45 - scanUniverse propaga alerta de cobertura baja
+  ---
+  duration_ms: 1.535972
+  type: 'test'
+  ...
+1..45
+# tests 48
+# suites 0
+# pass 48
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2006.687558

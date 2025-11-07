@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { DEFAULT_THRESHOLDS } from '../src/hooks/thresholdConfig.js';
-import { filterThresholdSchema, validateThresholdDraft } from '../src/validation/filterRules.js';
+import {
+  filterThresholdSchema,
+  validateThresholdDraft,
+  THRESHOLD_FIELD_VALIDATIONS,
+} from '../src/validation/filterRules.js';
 import { createThresholdSignature } from '../src/utils/thresholds.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -35,6 +39,16 @@ test('price range min greater than max is rejected', () => {
   assert.equal(result.errors['priceRange.US.max'], 'Debe ser ≥ mínimo');
 });
 
+test('multiple markets with inverted ranges flag each error path', () => {
+  const invalid = clone(DEFAULT_THRESHOLDS);
+  invalid.priceRange.US = { min: 30, max: 10 };
+  invalid.priceRange.EU = { min: 55, max: 20 };
+  const result = validateThresholdDraft(invalid);
+  assert.equal(result.success, false);
+  assert.equal(result.errors['priceRange.US.max'], 'Debe ser ≥ mínimo');
+  assert.equal(result.errors['priceRange.EU.max'], 'Debe ser ≥ mínimo');
+});
+
 test('float preferences enforce ordering', () => {
   const invalid = clone(DEFAULT_THRESHOLDS);
   invalid.float10 = invalid.float50 + 5;
@@ -65,6 +79,45 @@ test('spread values are normalized to three decimals', () => {
   const result = validateThresholdDraft(invalid);
   assert.equal(result.success, true);
   assert.equal(result.value.spreadMaxPct, 1.235);
+});
+
+test('null numeric values fall back to defaults without crashing', () => {
+  const invalid = clone(DEFAULT_THRESHOLDS);
+  invalid.rvolMin = null;
+  invalid.priceRange.US = { min: null, max: null };
+  invalid.liquidityMin.US = null;
+  const result = validateThresholdDraft(invalid);
+  assert.equal(result.success, true);
+  assert.equal(result.value.rvolMin, DEFAULT_THRESHOLDS.rvolMin);
+  assert.equal(result.value.priceRange.US.min, DEFAULT_THRESHOLDS.priceRange.US.min);
+  assert.equal(result.value.priceRange.US.max, DEFAULT_THRESHOLDS.priceRange.US.max);
+  assert.equal(result.value.liquidityMin.US, DEFAULT_THRESHOLDS.liquidityMin.US);
+});
+
+test('validation map covers every editable filter field', () => {
+  const mappedKeys = new Set(Object.keys(THRESHOLD_FIELD_VALIDATIONS));
+  const required = [
+    'marketsEnabled',
+    'priceRangeMin',
+    'priceRangeMax',
+    'liquidityMin',
+    'rvolMin',
+    'rvolIdeal',
+    'atrMin',
+    'atrPctMin',
+    'chgMin',
+    'float50',
+    'float10',
+    'rotationMin',
+    'rotationIdeal',
+    'shortMin',
+    'spreadMaxPct',
+    'parabolic50',
+    'needEMA200',
+  ];
+  required.forEach((key) => {
+    assert.ok(mappedKeys.has(key), `Missing validation mapping for ${key}`);
+  });
 });
 
 test('createThresholdSignature produces stable key for matching subsets', () => {

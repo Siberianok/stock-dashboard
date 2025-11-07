@@ -1,24 +1,7 @@
 import { PREVIEW_SAMPLE_TICKERS } from './previewSample.js';
 import { createCalc } from '../utils/calc.js';
-import { REQUIRED_FLAGS } from '../utils/constants.js';
 import { cloneThresholds, normalizeThresholds } from '../utils/thresholds.js';
-
-const evaluate = (calc, thresholds, ticker) => {
-  const market = ticker.market || 'US';
-  const computed = calc(ticker, market) || {};
-  const flags = computed.flags || {};
-  const passes = REQUIRED_FLAGS.every((flag) => {
-    if (flag === 'shortOK' && flags.shortMissing) return true;
-    return Boolean(flags[flag]);
-  });
-  const marketEnabled = thresholds?.marketsEnabled?.[market] !== false;
-  return {
-    passes: marketEnabled && passes,
-    score: typeof computed.score === 'number' ? computed.score : 0,
-    flags,
-    marketEnabled,
-  };
-};
+import { evaluateTicker, summarizeEvaluations } from './evaluator.js';
 
 const diffFlags = (draftFlags, appliedFlags) => {
   const allKeys = new Set([
@@ -40,33 +23,6 @@ const diffFlags = (draftFlags, appliedFlags) => {
   return { gained, lost };
 };
 
-const summarize = (entries) => {
-  return entries.reduce(
-    (acc, entry) => {
-      acc.total += 1;
-      acc[entry.status] = (acc[entry.status] || 0) + 1;
-      if (entry.draft.passes) {
-        acc.draftPass += 1;
-      }
-      if (entry.applied.passes) {
-        acc.appliedPass += 1;
-      }
-      return acc;
-    },
-    {
-      total: 0,
-      added: 0,
-      removed: 0,
-      improved: 0,
-      regressed: 0,
-      unchanged: 0,
-      stillFailing: 0,
-      draftPass: 0,
-      appliedPass: 0,
-    },
-  );
-};
-
 export const computeFilterPreview = ({
   appliedThresholds,
   draftThresholds,
@@ -78,8 +34,8 @@ export const computeFilterPreview = ({
   const calcDraft = createCalc(draft);
 
   const entries = sampleTickers.map((ticker) => {
-    const appliedEval = evaluate(calcApplied, applied, ticker);
-    const draftEval = evaluate(calcDraft, draft, ticker);
+    const appliedEval = evaluateTicker({ calc: calcApplied, thresholds: applied, data: ticker });
+    const draftEval = evaluateTicker({ calc: calcDraft, thresholds: draft, data: ticker });
     const scoreDelta = draftEval.score - appliedEval.score;
 
     let status = 'unchanged';
@@ -110,7 +66,7 @@ export const computeFilterPreview = ({
     };
   });
 
-  const summary = summarize(entries);
+  const summary = summarizeEvaluations(entries);
 
   return {
     entries,

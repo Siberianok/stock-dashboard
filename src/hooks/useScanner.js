@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchQuotes } from '../services/yahooFinance.js';
-import { REQUIRED_FLAGS, UNIVERSE } from '../utils/constants.js';
+import { UNIVERSE } from '../utils/constants.js';
 import { extractQuoteFields } from '../utils/quotes.js';
 import { logError } from '../utils/logger.js';
+import { evaluateTicker } from '../services/evaluator.js';
 
 const isBrowser = typeof window !== 'undefined';
 
-export const scanUniverse = async ({ enabledMarkets, calc, fetcher, coverageThreshold = 0.8 }) => {
+export const scanUniverse = async ({
+  enabledMarkets,
+  calc,
+  thresholds = {},
+  fetcher,
+  coverageThreshold = 0.8,
+}) => {
   const entries = enabledMarkets.flatMap((market) => (UNIVERSE[market] || []).map((symbol) => [symbol.toUpperCase(), market]));
   if (!entries.length) {
     return {
@@ -21,22 +28,19 @@ export const scanUniverse = async ({ enabledMarkets, calc, fetcher, coverageThre
     force: true,
     marketBySymbol: symbolToMarket,
   });
-  const matches = symbols.map((symbol) => {
-    const quote = quotes[symbol];
-    if (!quote) return null;
-    const market = symbolToMarket[symbol] || 'US';
-    const fields = extractQuoteFields(quote);
-    const data = { ticker: symbol, market, ...fields };
-    const computed = calc(data, market);
-    const flags = computed?.flags || {};
-    const passes = REQUIRED_FLAGS.every((flag) => {
-      if (flag === 'shortOK' && flags.shortMissing) return true;
-      return Boolean(flags[flag]);
-    });
-    if (!passes) return null;
-    return { data, computed };
-  }).filter(Boolean);
-  matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
+  const matches = symbols
+    .map((symbol) => {
+      const quote = quotes[symbol];
+      if (!quote) return null;
+      const market = symbolToMarket[symbol] || 'US';
+      const fields = extractQuoteFields(quote);
+      const data = { ticker: symbol, market, ...fields };
+      const evaluation = evaluateTicker({ calc, thresholds, data });
+      if (!evaluation.passes) return null;
+      return { data, computed: evaluation.computed, score: evaluation.score };
+    })
+    .filter(Boolean);
+  matches.sort((a, b) => (b.score || 0) - (a.score || 0));
   const coverage = fetchCoverage || {
     totalRequested: symbols.length,
     totalFetched: matches.length,
@@ -122,22 +126,19 @@ export const useScanner = ({ thresholds, calc, thresholdsKey, mode = 'live', cov
         controller.abort();
         return;
       }
-      const matches = symbols.map((symbol) => {
-        const quote = quotes[symbol];
-        if (!quote) return null;
-        const market = symbolToMarket[symbol] || 'US';
-        const fields = extractQuoteFields(quote);
-        const data = { ticker: symbol, market, ...fields };
-        const computed = calc(data, market);
-        const flags = computed?.flags || {};
-        const passes = REQUIRED_FLAGS.every((flag) => {
-          if (flag === 'shortOK' && flags.shortMissing) return true;
-          return Boolean(flags[flag]);
-        });
-        if (!passes) return null;
-        return { data, computed };
-      }).filter(Boolean);
-      matches.sort((a, b) => (b.computed.score || 0) - (a.computed.score || 0));
+      const matches = symbols
+        .map((symbol) => {
+          const quote = quotes[symbol];
+          if (!quote) return null;
+          const market = symbolToMarket[symbol] || 'US';
+          const fields = extractQuoteFields(quote);
+          const data = { ticker: symbol, market, ...fields };
+          const evaluation = evaluateTicker({ calc, thresholds, data });
+          if (!evaluation.passes) return null;
+          return { data, computed: evaluation.computed, score: evaluation.score };
+        })
+        .filter(Boolean);
+      matches.sort((a, b) => (b.score || 0) - (a.score || 0));
       const coverage = quotesCoverage || {
         totalRequested: symbols.length,
         totalFetched: matches.length,
