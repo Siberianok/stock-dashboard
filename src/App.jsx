@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef, useId } from 'react';
 import { COLORS, MARKETS } from './utils/constants.js';
 import { fmt, safeNumber, safePct, toNum } from './utils/format.js';
 import { uid } from './utils/misc.js';
@@ -390,6 +390,17 @@ function App() {
     const ageMs = Math.max(0, timeReference - new Date(lastUpdated).getTime());
     return { isStale: ageMs > 60_000, ageSeconds: Math.floor(ageMs / 1000) };
   }, [lastUpdated, timeReference]);
+
+  const [timeReference, setTimeReference] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isBrowser) return undefined;
+    const update = () => setTimeReference(Date.now());
+    update();
+    const intervalId = window.setInterval(update, 1000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const [metrics, setMetrics] = useState([]);
   const [logs, setLogs] = useState([]);
