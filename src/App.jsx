@@ -24,6 +24,7 @@ import { FlowSankeyCard } from './components/FlowSankeyCard.jsx';
 import { PerformanceRadarCard } from './components/PerformanceRadarCard.jsx';
 import { DashboardStatsSection } from './components/DashboardStatsSection.jsx';
 import { useRadarChartData } from './hooks/useRadarChartData.js';
+import { parseNumberInput } from './utils/forms.js';
 
 const TIME_RANGE_OPTIONS = [
   { key: '1D', label: '24h' },
@@ -133,13 +134,79 @@ const toCSVCell = (value) => {
   return sanitized;
 };
 
+const validateNumericValue = (value, options = {}) => {
+  const {
+    min = Number.NEGATIVE_INFINITY,
+    max = Number.POSITIVE_INFINITY,
+    allowEmpty = true,
+    allowZero = true,
+    formatter = (val) => fmt(val, 2),
+    validate,
+  } = options;
+
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return allowEmpty
+      ? { error: null, value: undefined }
+      : { error: 'Requerido', value: undefined };
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return { error: 'Valor inválido', value: undefined };
+  }
+
+  if (!allowZero && numericValue === 0) {
+    return { error: 'No puede ser 0', value: undefined };
+  }
+
+  if (Number.isFinite(min) && numericValue < min) {
+    return { error: `Debe ser ≥ ${formatter(min)}`, value: undefined };
+  }
+
+  if (Number.isFinite(max) && numericValue > max) {
+    return { error: `Debe ser ≤ ${formatter(max)}`, value: undefined };
+  }
+
+  if (typeof validate === 'function') {
+    const customError = validate(numericValue);
+    if (typeof customError === 'string' && customError.trim()) {
+      return { error: customError, value: undefined };
+    }
+  }
+
+  return { error: null, value: numericValue };
+};
+
+const createInitialPreviewState = () => ({ status: 'idle', result: null, error: null });
+
+const EMPTY_PREVIEW_SUMMARY = Object.freeze({
+  total: 0,
+  added: 0,
+  removed: 0,
+  improved: 0,
+  regressed: 0,
+  unchanged: 0,
+  stillFailing: 0,
+  draftPass: 0,
+  appliedPass: 0,
+});
+
+const createEmptyPreviewGroups = () => ({
+  added: [],
+  removed: [],
+  improved: [],
+  regressed: [],
+  unchanged: [],
+  stillFailing: [],
+});
+
 function App() {
-  const filterForm = useFilterForm();
   const {
     thresholds: draftThresholds,
     activeThresholds,
     history: thresholdsHistory,
     thresholdsKey: activeThresholdsKey,
+    setThresholds,
     updatePriceRange,
     updateLiquidityMin,
     toggleMarket,
@@ -156,6 +223,7 @@ function App() {
   } = useThresholds();
   const lastThresholdSnapshot = thresholdsHistory[thresholdsHistory.length - 1] || null;
   const activeCalc = useMemo(() => createCalc(activeThresholds), [activeThresholds]);
+  const appliedThresholds = activeThresholds;
   const calc = useMemo(() => createCalc(draftThresholds), [draftThresholds]);
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
@@ -190,6 +258,41 @@ function App() {
 
   const getError = useCallback((key) => validationErrors[key] || null, [validationErrors]);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const [previewState, setPreviewState] = useState(() => createInitialPreviewState());
+  const startPreview = useCallback(() => {
+    setPreviewState({ status: 'running', result: null, error: null });
+  }, []);
+  const completePreview = useCallback((result) => {
+    setPreviewState({ status: 'ready', result: result || null, error: null });
+  }, []);
+  const failPreview = useCallback((message) => {
+    const fallback = 'No se pudo generar la vista previa';
+    const normalizedMessage = typeof message === 'string' && message.trim() ? message : fallback;
+    setPreviewState({ status: 'error', result: null, error: normalizedMessage });
+  }, []);
+  const clearPreview = useCallback(() => {
+    setPreviewState(createInitialPreviewState());
+  }, []);
+  const previewResult = previewState.result;
+  const previewLoading = previewState.status === 'running';
+  const previewError = previewState.error;
+  const previewSummary = previewResult?.summary || EMPTY_PREVIEW_SUMMARY;
+  const previewEntries = previewResult?.entries || [];
+  const previewEvaluatedAt = previewResult?.evaluatedAt || null;
+  const previewGroups = useMemo(() => {
+    const groups = createEmptyPreviewGroups();
+    previewEntries.forEach((entry) => {
+      const status = entry?.status;
+      if (status && groups[status]) {
+        groups[status].push(entry);
+      } else {
+        groups.unchanged.push(entry);
+      }
+    });
+    return groups;
+  }, [previewEntries]);
+  const previewReady = previewState.status === 'ready';
+  const applyDisabled = previewLoading || !!previewError || !previewReady || !hasDraftChanges;
   const hasValidationErrors = useMemo(() => Object.keys(validationErrors).length > 0, [validationErrors]);
   const previewDisabled = hasValidationErrors;
   const previewHelperMessage = hasValidationErrors
@@ -213,6 +316,10 @@ function App() {
   const handleDiscardDraft = useCallback(() => {
     const discardedAt = discardDraft();
     setDraftNotice({ type: 'discarded', timestamp: discardedAt });
+  }, [discardDraft]);
+  const resetDraft = useCallback(() => {
+    discardDraft();
+    setDraftNotice(null);
   }, [discardDraft]);
   const draftStatusLabel = useMemo(() => {
     if (!draftNotice) return null;
@@ -383,14 +490,6 @@ function App() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }, [lastUpdated]);
 
-  const staleInfo = useMemo(() => {
-    if (!lastUpdated) {
-      return { isStale: false, ageSeconds: null };
-    }
-    const ageMs = Math.max(0, timeReference - new Date(lastUpdated).getTime());
-    return { isStale: ageMs > 60_000, ageSeconds: Math.floor(ageMs / 1000) };
-  }, [lastUpdated, timeReference]);
-
   const [timeReference, setTimeReference] = useState(() => Date.now());
   useEffect(() => {
     if (!isBrowser) return undefined;
@@ -401,6 +500,14 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  const staleInfo = useMemo(() => {
+    if (!lastUpdated) {
+      return { isStale: false, ageSeconds: null };
+    }
+    const ageMs = Math.max(0, timeReference - new Date(lastUpdated).getTime());
+    return { isStale: ageMs > 60_000, ageSeconds: Math.floor(ageMs / 1000) };
+  }, [lastUpdated, timeReference]);
 
   const [metrics, setMetrics] = useState([]);
   const [logs, setLogs] = useState([]);
