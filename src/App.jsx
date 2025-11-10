@@ -26,6 +26,7 @@ import { PerformanceRadarCard } from './components/PerformanceRadarCard.jsx';
 import { DashboardStatsSection } from './components/DashboardStatsSection.jsx';
 import { useRadarChartData } from './hooks/useRadarChartData.js';
 import { parseNumberInput } from './utils/forms.js';
+import { DATA_MODES, persistDataMode, readStoredDataMode } from './utils/dataMode.js';
 
 const TIME_RANGE_OPTIONS = [
   { key: '1D', label: '24h' },
@@ -353,16 +354,7 @@ function App({
     return parsed.toLocaleString();
   }, [draftMeta?.savedAt]);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [dataMode, setDataMode] = useState(initialDataMode);
-  const [autoFallbackActive, setAutoFallbackActive] = useState(
-    () => !!initialAutoFallback && initialDataMode === 'mock',
-  );
-  const [dataSourceNotice, setDataSourceNotice] = useState(() => {
-    if (initialAutoFallback) {
-      return initialDataSourceNotice || DATA_SOURCE_FALLBACK_MESSAGE;
-    }
-    return initialDataSourceNotice || null;
-  });
+  const [dataMode, setDataMode] = useState(() => readStoredDataMode());
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
@@ -382,6 +374,10 @@ function App({
       return rows[0].id;
     });
   }, [rows]);
+
+  useEffect(() => {
+    persistDataMode(dataMode);
+  }, [dataMode]);
 
   useEffect(() => {
     if (!isBrowser) return;
@@ -412,8 +408,7 @@ function App({
     });
     return map;
   }, [rows]);
-  const isSimulatedMode = dataMode === 'mock';
-  const fallbackNotice = dataSourceNotice || DATA_SOURCE_FALLBACK_MESSAGE;
+  const isSimulatedMode = dataMode === DATA_MODES.MOCK;
 
   useEffect(() => {
     if (!tickersKey) {
@@ -461,15 +456,12 @@ function App({
           return;
         }
         logError('quotes.fetch', error);
-        setFetchError(error?.message || 'Error al actualizar datos');
-        setDataMode((prevMode) => {
-          if (prevMode !== 'live') {
-            return prevMode;
-          }
-          setAutoFallbackActive(true);
-          setDataSourceNotice(DATA_SOURCE_FALLBACK_MESSAGE);
-          return 'mock';
-        });
+        if (dataMode !== DATA_MODES.MOCK) {
+          setFetchError('No se pudo obtener datos en vivo. Se activó el modo simulado automáticamente.');
+          setDataMode(DATA_MODES.MOCK);
+        } else {
+          setFetchError(error?.message || 'Error al actualizar datos');
+        }
       } finally {
         if (!active) return;
         if (quotesAbortRef.current === controller) {
@@ -684,19 +676,8 @@ function App({
   const scannerCoverageAlert = !!scannerState.coverage?.alert;
 
   const toggleDataMode = useCallback(() => {
-    setDataMode((prev) => {
-      if (prev === 'live') {
-        setAutoFallbackActive(false);
-        if (!autoFallbackActive) {
-          setDataSourceNotice(null);
-        }
-        return 'mock';
-      }
-      setAutoFallbackActive(false);
-      setDataSourceNotice(null);
-      return 'live';
-    });
-  }, [autoFallbackActive]);
+    setDataMode((prev) => (prev === DATA_MODES.LIVE ? DATA_MODES.MOCK : DATA_MODES.LIVE));
+  }, []);
 
   const openPreview = useCallback(async () => {
     if (previewDisabled) {
