@@ -5,6 +5,7 @@ import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
 import { createCalc } from './utils/calc.js';
 import { fetchQuotes, clearCache } from './services/yahooFinance.js';
+import { DATA_SOURCE_FALLBACK_MESSAGE } from './services/dataSourceStatus.js';
 import { computeFilterPreview } from './services/filterPreview.js';
 import { useThresholds } from './hooks/useThresholds.js';
 import { useScanner } from './hooks/useScanner.js';
@@ -200,7 +201,11 @@ const createEmptyPreviewGroups = () => ({
   stillFailing: [],
 });
 
-function App() {
+function App({
+  initialDataMode = 'live',
+  initialDataSourceNotice = null,
+  initialAutoFallback = false,
+} = {}) {
   const {
     thresholds: draftThresholds,
     activeThresholds,
@@ -348,7 +353,16 @@ function App() {
     return parsed.toLocaleString();
   }, [draftMeta?.savedAt]);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [dataMode, setDataMode] = useState('live');
+  const [dataMode, setDataMode] = useState(initialDataMode);
+  const [autoFallbackActive, setAutoFallbackActive] = useState(
+    () => !!initialAutoFallback && initialDataMode === 'mock',
+  );
+  const [dataSourceNotice, setDataSourceNotice] = useState(() => {
+    if (initialAutoFallback) {
+      return initialDataSourceNotice || DATA_SOURCE_FALLBACK_MESSAGE;
+    }
+    return initialDataSourceNotice || null;
+  });
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const quotesAbortRef = useRef(null);
@@ -399,6 +413,7 @@ function App() {
     return map;
   }, [rows]);
   const isSimulatedMode = dataMode === 'mock';
+  const fallbackNotice = dataSourceNotice || DATA_SOURCE_FALLBACK_MESSAGE;
 
   useEffect(() => {
     if (!tickersKey) {
@@ -447,6 +462,14 @@ function App() {
         }
         logError('quotes.fetch', error);
         setFetchError(error?.message || 'Error al actualizar datos');
+        setDataMode((prevMode) => {
+          if (prevMode !== 'live') {
+            return prevMode;
+          }
+          setAutoFallbackActive(true);
+          setDataSourceNotice(DATA_SOURCE_FALLBACK_MESSAGE);
+          return 'mock';
+        });
       } finally {
         if (!active) return;
         if (quotesAbortRef.current === controller) {
@@ -661,8 +684,19 @@ function App() {
   const scannerCoverageAlert = !!scannerState.coverage?.alert;
 
   const toggleDataMode = useCallback(() => {
-    setDataMode((prev) => (prev === 'live' ? 'mock' : 'live'));
-  }, []);
+    setDataMode((prev) => {
+      if (prev === 'live') {
+        setAutoFallbackActive(false);
+        if (!autoFallbackActive) {
+          setDataSourceNotice(null);
+        }
+        return 'mock';
+      }
+      setAutoFallbackActive(false);
+      setDataSourceNotice(null);
+      return 'live';
+    });
+  }, [autoFallbackActive]);
 
   const openPreview = useCallback(async () => {
     if (previewDisabled) {
@@ -1030,80 +1064,90 @@ function App() {
     <>
       <div className={`min-h-screen ${COLORS.baseBg} text-slate-100`}>
         <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Selector de acciones parabólicas</h1>
-            <p className="text-sm text-white/70 max-w-2xl mt-2">
-              Checklist momentum + scoring + charts para monitorear plays parabólicos. Ajustá umbrales por mercado, escaneá el universo automático y filtrá los tickers más explosivos.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/60">
-              <button className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 transition" onClick={seedDemo}>Cargar demo</button>
-              <button className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 transition" onClick={refreshQuotes}>Refrescar precios</button>
+          {autoFallbackActive && isSimulatedMode ? (
+            <div
+              className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-100"
+              role="status"
+              aria-live="polite"
+            >
+              <span aria-hidden="true" className="inline-flex h-2 w-2 animate-pulse rounded-full bg-amber-300" />
+              <span>{fallbackNotice}</span>
             </div>
-          </div>
-          <div className={`rounded-2xl ${COLORS.glass} p-4 text-sm max-w-xs space-y-3`}>
+          ) : null}
+          <header className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-wide text-white/60">Presets rápidos</div>
-              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
-              <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
-            </div>
-            <div className="pt-3 border-t border-white/10 space-y-2">
-              <div className="text-xs uppercase tracking-wide text-white/60">Historial de umbrales</div>
-              <button
-                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => pushSnapshot('Manual')}
-              >
-                Guardar snapshot
-              </button>
-              <button
-                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!thresholdsHistory.length}
-                onClick={undoThresholds}
-              >
-                Deshacer último cambio
-              </button>
-              {lastThresholdSnapshot ? (
-                <p className="text-[11px] text-white/60 leading-snug">
-                  Último snapshot: {lastThresholdSnapshot.label || 'Sin título'} ·{' '}
-                  {new Date(lastThresholdSnapshot.savedAt).toLocaleString()}
-                </p>
-              ) : (
-                <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
-              )}
-            </div>
-            <div className="pt-3 border-t border-white/10 space-y-2">
-              <div className="text-xs uppercase tracking-wide text-white/60">Borradores de filtros</div>
-              <button
-                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleSaveDraft}
-                disabled={!hasUnsavedDraftChanges}
-              >
-                Guardar borrador
-              </button>
-              <button
-                className="w-full px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleApplyDraft}
-                disabled={!hasDraftChanges}
-              >
-                Aplicar borrador
-              </button>
-              <button
-                className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleDiscardDraft}
-                disabled={!hasDraftChanges && !hasUnsavedDraftChanges}
-              >
-                Descartar cambios
-              </button>
-              <div className="text-[11px] text-white/60 leading-snug space-y-1">
-                <p>{hasDraftChanges ? 'El borrador es diferente a los filtros activos.' : 'El borrador coincide con los filtros activos.'}</p>
-                <p className={hasUnsavedDraftChanges ? 'text-amber-300' : ''}>
-                  {hasUnsavedDraftChanges ? 'Cambios pendientes de guardar.' : `Último guardado: ${draftSavedAtLabel}`}
-                </p>
-                {draftStatusLabel ? <p className="text-white/70">{draftStatusLabel}</p> : null}
+              <h1 className="text-3xl font-bold tracking-tight">Selector de acciones parabólicas</h1>
+              <p className="text-sm text-white/70 max-w-2xl mt-2">
+                Checklist momentum + scoring + charts para monitorear plays parabólicos. Ajustá umbrales por mercado, escaneá el universo automático y filtrá los tickers más explosivos.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/60">
+                <button className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 transition" onClick={seedDemo}>Cargar demo</button>
+                <button className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 transition" onClick={refreshQuotes}>Refrescar precios</button>
               </div>
             </div>
-          </div>
-        </header>
+            <div className={`rounded-2xl ${COLORS.glass} p-4 text-sm max-w-xs space-y-3`}>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-white/60">Presets rápidos</div>
+                <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetModerado}>Moderado (Momentum)</button>
+                <button className="mt-2 w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition" onClick={presetAgresivo}>Agresivo (50%)</button>
+              </div>
+              <div className="pt-3 border-t border-white/10 space-y-2">
+                <div className="text-xs uppercase tracking-wide text-white/60">Historial de umbrales</div>
+                <button
+                  className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => pushSnapshot('Manual')}
+                >
+                  Guardar snapshot
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!thresholdsHistory.length}
+                  onClick={undoThresholds}
+                >
+                  Deshacer último cambio
+                </button>
+                {lastThresholdSnapshot ? (
+                  <p className="text-[11px] text-white/60 leading-snug">
+                    Último snapshot: {lastThresholdSnapshot.label || 'Sin título'} ·{' '}
+                    {new Date(lastThresholdSnapshot.savedAt).toLocaleString()}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-white/50">Aún no guardaste snapshots.</p>
+                )}
+              </div>
+              <div className="pt-3 border-t border-white/10 space-y-2">
+                <div className="text-xs uppercase tracking-wide text-white/60">Borradores de filtros</div>
+                <button
+                  className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleSaveDraft}
+                  disabled={!hasUnsavedDraftChanges}
+                >
+                  Guardar borrador
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleApplyDraft}
+                  disabled={!hasDraftChanges}
+                >
+                  Aplicar borrador
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleDiscardDraft}
+                  disabled={!hasDraftChanges && !hasUnsavedDraftChanges}
+                >
+                  Descartar cambios
+                </button>
+                <div className="text-[11px] text-white/60 leading-snug space-y-1">
+                  <p>{hasDraftChanges ? 'El borrador es diferente a los filtros activos.' : 'El borrador coincide con los filtros activos.'}</p>
+                  <p className={hasUnsavedDraftChanges ? 'text-amber-300' : ''}>
+                    {hasUnsavedDraftChanges ? 'Cambios pendientes de guardar.' : `Último guardado: ${draftSavedAtLabel}`}
+                  </p>
+                  {draftStatusLabel ? <p className="text-white/70">{draftStatusLabel}</p> : null}
+                </div>
+              </div>
+            </div>
+          </header>
 
         <DashboardStatsSection
           timeRange={timeRange}
