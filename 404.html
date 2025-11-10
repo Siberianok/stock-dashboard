@@ -3,16 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <title>Redirigiendo…</title>
-    <meta http-equiv="refresh" content="0; url=/stock-dashboard/" />
-    <link rel="canonical" href="/stock-dashboard/" />
+    <meta http-equiv="refresh" content="0; url=./" />
+    <link rel="canonical" href="./" />
     <script>
       (function() {
-        var redirect = "/stock-dashboard/" + (window.location.search || "") + (window.location.hash || "");
+        var pathname = window.location.pathname;
+        var basePath = pathname.slice(0, pathname.lastIndexOf('/') + 1);
+        var redirect = basePath + (window.location.search || "") + (window.location.hash || "");
         window.location.replace(redirect);
       })();
     </script>
   </head>
   <body>
-    <p>Redirigiendo a <a href="/stock-dashboard/">/stock-dashboard/</a>…</p>
+    <p>Redirigiendo a <a href="./">el inicio</a>…</p>
   </body>
 </html>
