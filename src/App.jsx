@@ -217,6 +217,7 @@ function App() {
     saveDraft,
     applyDraft,
     discardDraft,
+    resetThresholds,
     hasDraftChanges,
     hasUnsavedDraftChanges,
     draftMeta,
@@ -317,6 +318,19 @@ function App() {
     const discardedAt = discardDraft();
     setDraftNotice({ type: 'discarded', timestamp: discardedAt });
   }, [discardDraft]);
+  const handleResetThresholds = useCallback(() => {
+    if (isBrowser) {
+      const confirmed = window.confirm(
+        'Esto borrará el borrador, el historial y restablecerá los valores por defecto. ¿Querés continuar?',
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    resetThresholds();
+    setValidationErrors({});
+    setDraftNotice({ type: 'reset', timestamp: new Date().toISOString() });
+  }, [resetThresholds, setValidationErrors]);
   const resetDraft = useCallback(() => {
     discardDraft();
     setDraftNotice(null);
@@ -337,6 +351,8 @@ function App() {
         return `Cambios descartados${timeLabel ? ` · ${timeLabel}` : ''}`;
       case 'noop':
         return 'No hay cambios para aplicar.';
+      case 'reset':
+        return `Umbrales restablecidos${timeLabel ? ` · ${timeLabel}` : ''}`;
       default:
         return null;
     }
@@ -1062,6 +1078,15 @@ function App() {
               >
                 Deshacer último cambio
               </button>
+              <button
+                className="w-full px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 transition"
+                onClick={handleResetThresholds}
+              >
+                Reset a valores por defecto
+              </button>
+              <p className="text-[11px] text-white/60 leading-snug">
+                Limpia el almacenamiento local y repuebla los umbrales con DEFAULT_THRESHOLDS.
+              </p>
               {lastThresholdSnapshot ? (
                 <p className="text-[11px] text-white/60 leading-snug">
                   Último snapshot: {lastThresholdSnapshot.label || 'Sin título'} ·{' '}

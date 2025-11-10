@@ -64,9 +64,11 @@ npm run build
 
 ## Gestión de umbrales (thresholds)
 
-- **Reset completo:** ejecutá `localStorage.removeItem('selector.thresholds')` en la consola del navegador o llamá a
-  `persistThresholdState({ thresholds: DEFAULT_THRESHOLDS, history: [] })` desde un script. Ambos caminos generan un estado
-  limpio que repuebla la aplicación con los valores de `DEFAULT_THRESHOLDS` y reinicia el borrador.
+- **Reset completo:** usá el botón **Reset a valores por defecto** del panel lateral para borrar el almacenamiento local y
+  repoblar la aplicación con `DEFAULT_THRESHOLDS`. Como alternativa rápida, ejecutá
+  `localStorage.removeItem('selector.thresholds')` en la consola del navegador o llamá a
+  `persistThresholdState({ thresholds: DEFAULT_THRESHOLDS, history: [] })` desde un script. Todos los caminos generan un estado
+  limpio y reinician el borrador.
 - **Mapeo de validaciones:** cualquier campo editable del formulario está descrito en
   `THRESHOLD_FIELD_VALIDATIONS` (`src/validation/filterRules.js`). Esta estructura documenta tipo, límites y reglas cruzadas
   y debe actualizarse al agregar nuevos inputs.

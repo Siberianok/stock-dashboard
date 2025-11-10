@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   loadThresholdState,
   persistThresholdState,
+  resetThresholdState,
 } from '../src/services/storage/thresholdStorage.js';
 import {
   withDraftUpdate,
@@ -15,15 +16,7 @@ import { DEFAULT_THRESHOLDS, applyPresetAgresivo } from '../src/hooks/thresholdC
 import { cloneThresholds } from '../src/utils/thresholds.js';
 
 const resetState = () => {
-  persistThresholdState({
-    thresholds: cloneThresholds(DEFAULT_THRESHOLDS),
-    history: [],
-    draft: {
-      thresholds: cloneThresholds(DEFAULT_THRESHOLDS),
-      savedAt: null,
-      updatedAt: null,
-    },
-  });
+  resetThresholdState();
 };
 
 test.beforeEach(resetState);
