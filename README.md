@@ -49,6 +49,12 @@ La configuración completa (incluyendo fallback manual y rollback) está detalla
 
 ## Desarrollo local
 
+### Requisitos de entorno
+
+- **Node.js 20.x:** el archivo [`.nvmrc`](.nvmrc) fija la versión recomendada. Si usás `nvm`, ejecutá `nvm use` para alinear tu entorno local con los workflows de CI/CD.
+
+### Comandos principales
+
 Instalá dependencias y levantá el entorno de desarrollo:
 
 ```bash
@@ -61,6 +67,14 @@ El build de producción se genera con:
 ```bash
 npm run build
 ```
+
+Para reproducir el comportamiento del despliegue (incluido el `base` configurado en Vite), corré el servidor de previsualización:
+
+```bash
+npm run preview
+```
+
+Usá la URL que muestra la consola y navegá rutas internas desde allí. Si la aplicación aparece en blanco durante la previsualización, el problema está en la build o en el `base` configurado — no en GitHub Pages.
 
 ## Gestión de umbrales (thresholds)
 
