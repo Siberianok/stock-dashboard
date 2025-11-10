@@ -1,5 +1,38 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+function copyStaticFiles(files) {
+  let outDir;
+  let rootDir;
+
+  return {
+    name: 'copy-static-files',
+    apply: 'build',
+    configResolved(config) {
+      outDir = config.build.outDir;
+      rootDir = config.root;
+    },
+    closeBundle() {
+      if (!outDir || !rootDir) {
+        return;
+      }
+
+      for (const file of files) {
+        const source = resolve(rootDir, file);
+
+        if (!existsSync(source)) {
+          continue;
+        }
+
+        const destination = resolve(rootDir, outDir, file);
+        mkdirSync(dirname(destination), { recursive: true });
+        copyFileSync(source, destination);
+      }
+    },
+  };
+}
 
 const REPO_BASE_PATH = '/stock-dashboard/';
 
