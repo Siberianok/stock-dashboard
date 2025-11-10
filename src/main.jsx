@@ -1,10 +1,18 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from './router/BrowserRouter.jsx';
 import App from './App.jsx';
+import RootErrorBoundary from './components/RootErrorBoundary.jsx';
+import { forceSimulatedMode } from './utils/dataMode.js';
 import './styles.css';
+import { detectDataSourceStatus } from './services/dataSourceStatus.js';
+
+const basename = import.meta.env.BASE_URL ?? '/';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter basename={basename}>
+      <App />
+    </BrowserRouter>
   </React.StrictMode>,
 );
