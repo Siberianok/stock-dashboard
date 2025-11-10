@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
-  base: '/stock-dashboard/',
+const REPO_BASE_PATH = '/stock-dashboard/';
+
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? REPO_BASE_PATH : '/',
   plugins: [react()],
   test: {
     environment: 'jsdom',
@@ -18,4 +20,4 @@ export default defineConfig({
       lines: 80,
     },
   },
-});
+}));
