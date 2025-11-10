@@ -5,6 +5,7 @@ import App from './App.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { forceSimulatedMode } from './utils/dataMode.js';
 import './styles.css';
+import { detectDataSourceStatus } from './services/dataSourceStatus.js';
 
 const basename = import.meta.env.BASE_URL ?? '/';
 
