@@ -9,6 +9,7 @@ const isBrowser = typeof window !== 'undefined';
 const STORAGE_KEY = 'selector.thresholds';
 const LEGACY_KEYS = ['selector.thresholds.v1'];
 const CURRENT_VERSION = 3;
+export const THRESHOLD_STATE_VERSION = CURRENT_VERSION;
 export const MAX_THRESHOLD_HISTORY = 10;
 
 const memoryStore = new Map();
@@ -59,6 +60,11 @@ const safeSetItem = (key, value) => {
   }
 };
 
+const clearPersistedKey = (key) => {
+  safeRemoveItem(key);
+  memoryStore.delete(key);
+};
+
 const readRawState = () => {
   const primary = safeGetItem(STORAGE_KEY);
   if (primary) {
@@ -95,6 +101,11 @@ const writeState = (payload) => {
     safeRemoveItem(legacy);
     memoryStore.delete(legacy);
   });
+};
+
+const resetPersistedState = () => {
+  clearPersistedKey(STORAGE_KEY);
+  LEGACY_KEYS.forEach(clearPersistedKey);
 };
 
 export const createSnapshot = (thresholds, { label, savedAt } = {}) => {
@@ -214,20 +225,14 @@ const applyMigrations = (payload) => {
 export const loadThresholdState = () => {
   const { raw, key } = readRawState();
   if (!raw) {
-    return {
-      thresholds: normalizeThresholds(DEFAULT_THRESHOLDS),
-      history: [],
-    };
+    return finalizeState({ thresholds: DEFAULT_THRESHOLDS, history: [] });
   }
   const parsed = safeParse(raw);
   if (!parsed) {
-    return {
-      thresholds: normalizeThresholds(DEFAULT_THRESHOLDS),
-      history: [],
-    };
+    return finalizeState({ thresholds: DEFAULT_THRESHOLDS, history: [] });
   }
   const migrated = applyMigrations(parsed);
-  if (key !== STORAGE_KEY) {
+  if (key !== STORAGE_KEY || parsed.version !== CURRENT_VERSION) {
     writeState(migrated);
   }
   return {
@@ -241,6 +246,13 @@ export const persistThresholdState = (state) => {
   const finalized = finalizeState(state);
   writeState(finalized);
   return finalized;
+};
+
+export const resetThresholdState = () => {
+  resetPersistedState();
+  const reset = finalizeState({ thresholds: DEFAULT_THRESHOLDS, history: [] });
+  writeState(reset);
+  return reset;
 };
 
 export const pushSnapshot = (state, { label } = {}) => {
@@ -257,4 +269,20 @@ export const shouldPersistUpdate = (previous, next) => {
   return !areThresholdsEqual(previous.thresholds, next.thresholds) ||
     previous.history.length !== next.history.length ||
     draftChanged;
+};
+
+export const __TESTING__ = {
+  setRawState(raw, key = STORAGE_KEY) {
+    if (raw === null || raw === undefined) {
+      memoryStore.delete(key);
+      return;
+    }
+    memoryStore.set(key, raw);
+  },
+  getRawState(key = STORAGE_KEY) {
+    return memoryStore.get(key) ?? null;
+  },
+  clear() {
+    memoryStore.clear();
+  },
 };

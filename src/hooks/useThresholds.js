@@ -14,6 +14,7 @@ import {
   persistThresholdState,
   createSnapshot,
   MAX_THRESHOLD_HISTORY,
+  resetThresholdState,
 } from '../services/storage/thresholdStorage.js';
 
 const now = () => new Date().toISOString();
@@ -309,6 +310,10 @@ export function useThresholds() {
     return discardedAt;
   }, []);
 
+  const resetThresholds = useCallback(() => {
+    setState(() => cloneState(resetThresholdState()));
+  }, []);
+
   const thresholds = state.draft?.thresholds ?? state.thresholds;
   const draftMeta = {
     savedAt: state.draft?.savedAt ?? null,
@@ -344,6 +349,7 @@ export function useThresholds() {
     saveDraft,
     applyDraft,
     discardDraft,
+    resetThresholds,
     hasDraftChanges,
     hasUnsavedDraftChanges,
     draftMeta,

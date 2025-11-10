@@ -223,6 +223,7 @@ function App({
     saveDraft,
     applyDraft,
     discardDraft,
+    resetThresholds,
     hasDraftChanges,
     hasUnsavedDraftChanges,
     draftMeta,
@@ -323,6 +324,19 @@ function App({
     const discardedAt = discardDraft();
     setDraftNotice({ type: 'discarded', timestamp: discardedAt });
   }, [discardDraft]);
+  const handleResetThresholds = useCallback(() => {
+    if (isBrowser) {
+      const confirmed = window.confirm(
+        'Esto borrará el borrador, el historial y restablecerá los valores por defecto. ¿Querés continuar?',
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    resetThresholds();
+    setValidationErrors({});
+    setDraftNotice({ type: 'reset', timestamp: new Date().toISOString() });
+  }, [resetThresholds, setValidationErrors]);
   const resetDraft = useCallback(() => {
     discardDraft();
     setDraftNotice(null);
@@ -343,6 +357,8 @@ function App({
         return `Cambios descartados${timeLabel ? ` · ${timeLabel}` : ''}`;
       case 'noop':
         return 'No hay cambios para aplicar.';
+      case 'reset':
+        return `Umbrales restablecidos${timeLabel ? ` · ${timeLabel}` : ''}`;
       default:
         return null;
     }

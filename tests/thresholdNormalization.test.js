@@ -11,6 +11,9 @@ import {
   loadThresholdState,
   persistThresholdState,
   MAX_THRESHOLD_HISTORY,
+  resetThresholdState,
+  THRESHOLD_STATE_VERSION,
+  __TESTING__,
 } from '../src/services/storage/thresholdStorage.js';
 
 const almostEqual = (a, b, epsilon = 1e-6) => Math.abs(a - b) < epsilon;
@@ -61,6 +64,55 @@ test('normalizeThresholds merges defaults and normalizes per market values', () 
   assert.equal(normalized.parabolic50, true);
 });
 
+test('loadThresholdState returns finalized schema when storage is empty', () => {
+  __TESTING__.clear();
+  const loaded = loadThresholdState();
+
+  assert.deepEqual(loaded.thresholds, normalizeThresholds(DEFAULT_THRESHOLDS));
+  assert.equal(Array.isArray(loaded.history), true);
+  assert.equal(loaded.history.length, 0);
+  assert.ok(loaded.draft);
+  assert.equal(loaded.draft.savedAt, null);
+  assert.equal(typeof loaded.draft.updatedAt, 'string');
+});
+
+test('loadThresholdState migrates legacy payloads to the current schema', () => {
+  __TESTING__.clear();
+  const legacy = {
+    version: 1,
+    thresholds: {
+      ...DEFAULT_THRESHOLDS,
+      marketsEnabled: { US: false },
+      rvolMin: '3.777',
+    },
+    history: [
+      {
+        savedAt: '2023-01-01T00:00:00.000Z',
+        thresholds: { ...DEFAULT_THRESHOLDS, chgMin: '18.234' },
+      },
+    ],
+  };
+
+  __TESTING__.setRawState(JSON.stringify(legacy));
+
+  const migrated = loadThresholdState();
+
+  assert.equal(migrated.thresholds.marketsEnabled.US, false);
+  assert.ok(Math.abs(migrated.thresholds.rvolMin - 3.78) < 1e-6);
+  assert.equal(migrated.history.length, 1);
+  assert.equal(migrated.history[0].savedAt, '2023-01-01T00:00:00.000Z');
+  assert.equal(migrated.draft.savedAt, null);
+  assert.equal(typeof migrated.draft.updatedAt, 'string');
+
+  const raw = __TESTING__.getRawState();
+  assert.ok(raw);
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.version, THRESHOLD_STATE_VERSION);
+  assert.equal(parsed.thresholds.rvolMin, migrated.thresholds.rvolMin);
+
+  resetThresholdState();
+});
+
 test('createSnapshot clones and timestamps thresholds', () => {
   const payload = { ...DEFAULT_THRESHOLDS, rvolMin: 9.9 };
   const savedAt = '2024-01-01T00:00:00.000Z';
@@ -104,5 +156,5 @@ test('persistThresholdState stores normalized state and trims history', () => {
   assert.equal(reloaded.thresholds.rvolMin, 4.44);
   assert.equal(reloaded.history.length, MAX_THRESHOLD_HISTORY);
 
-  persistThresholdState({ thresholds: DEFAULT_THRESHOLDS, history: [] });
+  resetThresholdState();
 });
