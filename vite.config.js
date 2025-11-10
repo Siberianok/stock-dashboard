@@ -34,9 +34,11 @@ function copyStaticFiles(files) {
   };
 }
 
-export default defineConfig({
-  base: '/stock-dashboard/',
-  plugins: [react(), copyStaticFiles(['404.html', '.nojekyll'])],
+const REPO_BASE_PATH = '/stock-dashboard/';
+
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? REPO_BASE_PATH : '/',
+  plugins: [react()],
   test: {
     environment: 'jsdom',
     setupFiles: './tests/setupTests.js',
@@ -51,4 +53,4 @@ export default defineConfig({
       lines: 80,
     },
   },
-});
+}));
