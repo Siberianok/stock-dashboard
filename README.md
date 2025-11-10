@@ -22,7 +22,8 @@ La configuración completa (incluyendo fallback manual y rollback) está detalla
 ## Deploy automático (recomendado)
 
 - Cada `push` a `main` ejecuta el workflow [`Deploy dashboard to GitHub Pages`](.github/workflows/deploy.yml).
-- El workflow instala dependencias (`npm ci`), corre los tests (`npm test`), compila la `dist/` con Vite (`npm run build`) y publica el artefacto con `actions/deploy-pages`.
+- El workflow instala dependencias (`npm ci`), compila la `dist/` con Vite (`npm run build`) y publica el artefacto con `actions/deploy-pages`.
+- Las pruebas continúan en el workflow [`CI`](.github/workflows/ci.yml), que corre lint, tests y valida el build sin bloquear el despliegue.
 - Al finalizar, el job `deploy` asocia el resultado al entorno `github-pages` para facilitar aprobaciones y seguimiento.
 
 ## Deploy manual y rollback
