@@ -11,11 +11,11 @@ export const COLORS = {
 };
 
 export const MARKETS = {
-  US: { label: 'EEUU', currency: 'USD' },
-  AR: { label: 'Argentina', currency: 'ARS' },
-  BR: { label: 'Brasil', currency: 'BRL' },
-  EU: { label: 'Europa', currency: 'EUR' },
-  CN: { label: 'China', currency: 'CNY' },
+  US: { label: 'EEUU', currency: 'USD', flag: '🇺🇸' },
+  AR: { label: 'Argentina', currency: 'ARS', flag: '🇦🇷' },
+  BR: { label: 'Brasil', currency: 'BRL', flag: '🇧🇷' },
+  EU: { label: 'Europa', currency: 'EUR', flag: '🇪🇺' },
+  CN: { label: 'China', currency: 'CNY', flag: '🇨🇳' },
 };
 
 export const UNIVERSE = {
