@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef, useId } from 'react';
-import { COLORS, MARKETS } from './utils/constants.js';
+import { COLORS } from './utils/constants.js';
 import { fmt, safeNumber, safePct, toNum } from './utils/format.js';
 import { uid } from './utils/misc.js';
 import { extractQuoteFields } from './utils/quotes.js';
@@ -13,6 +13,7 @@ import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
 import { useHistoricalBenchmarks } from './hooks/useHistoricalBenchmarks.js';
 import { useTheme } from './hooks/useTheme.js';
 import { useChartExport } from './hooks/useChartExport.js';
+import { useMarkets } from './hooks/useMarkets.js';
 import { TickerTable } from './components/TickerTable.jsx';
 import { ScoreBar } from './components/ScoreBar.jsx';
 import { Badge } from './components/Badge.jsx';
@@ -27,6 +28,7 @@ import { DashboardStatsSection } from './components/DashboardStatsSection.jsx';
 import { useRadarChartData } from './hooks/useRadarChartData.js';
 import { parseNumberInput } from './utils/forms.js';
 import { DATA_MODES, persistDataMode, readStoredDataMode } from './utils/dataMode.js';
+import MarketSelect from './components/MarketSelect.jsx';
 
 const TIME_RANGE_OPTIONS = [
   { key: '1D', label: '24h' },
@@ -235,6 +237,12 @@ function App({
   const { rows, setRows, addRow, clearRows, updateRow } = useTickerRows();
   const [validationErrors, setValidationErrors] = useState({});
   const [draftNotice, setDraftNotice] = useState(null);
+  const { markets, marketEntries } = useMarkets();
+  const marketLookup = useMemo(() => markets || {}, [markets]);
+  const getMarketInfo = useCallback(
+    (marketKey) => marketLookup[marketKey] || marketLookup.US || { label: marketKey, currency: '' },
+    [marketLookup],
+  );
   const setFieldError = useCallback((key, message) => {
     setValidationErrors((prev) => {
       if (message) {
@@ -850,7 +858,7 @@ function App({
     const lines = [headers.join(',')];
     rows.forEach((row) => {
       const market = row.market || 'US';
-      const info = MARKETS[market] || MARKETS.US;
+      const info = getMarketInfo(market);
       const { rvol, atrPct, chgPct, rotation, score, flags } = calc(row, market);
       const cells = [
         row.ticker,
@@ -1193,27 +1201,14 @@ function App({
           </div>
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={marketsLegendId}>
-                <legend
-                  id={marketsLegendId}
-                  className="font-semibold mb-4 text-center text-lg tracking-wide"
-                >
-                  Mercados
-                </legend>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {Object.entries(MARKETS).map(([key, info]) => (
-                    <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
-                      <span className="font-medium">{info.label}</span>
-                      <input
-                        type="checkbox"
-                        aria-label={`Habilitar mercado ${info.label}`}
-                        checked={!!draftThresholds.marketsEnabled?.[key]}
-                        onChange={(e) => toggleMarket(key, e.target.checked)}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <MarketSelect
+                legendId={marketsLegendId}
+                markets={markets}
+                selected={draftThresholds.marketsEnabled || {}}
+                onToggle={toggleMarket}
+                className=""
+                columns={2}
+              />
 
               <fieldset className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`} aria-labelledby={priceLegendId}>
                 <legend
@@ -1223,7 +1218,7 @@ function App({
                   Precio
                 </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  {Object.entries(MARKETS).map(([key, info]) => {
+                  {marketEntries.map(([key, info = {}]) => {
                     const priceRange = draftThresholds.priceRange?.[key] || {};
                     const minKey = `price-${key}-min`;
                     const maxKey = `price-${key}-max`;
@@ -1376,7 +1371,7 @@ function App({
                   Técnico & Micro
                 </legend>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-center place-items-center">
-                  {Object.entries(MARKETS).map(([key, info]) => {
+                  {marketEntries.map(([key, info = {}]) => {
                     const errorKey = `liq-${key}`;
                     const error = getError(errorKey);
                     const inputId = `${errorKey}-input`;
@@ -1555,15 +1550,17 @@ function App({
             {!scannerResultsStale && !scannerLoading && !scannerMatches.length && !scannerError ? <div className="text-sm text-white/60">Ningún ticker del universo cumple todos los filtros actualmente.</div> : null}
             {scannerMatches.length ? (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {scannerMatches.map(({ data, computed }) => (
-                  <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="text-lg font-semibold text-white">{data.ticker}</div>
-                        <div className="text-[11px] text-white/60">{MARKETS[data.market]?.label || data.market}</div>
+                {scannerMatches.map(({ data, computed }) => {
+                  const info = getMarketInfo(data.market);
+                  return (
+                    <div key={`${data.ticker}-${data.market}`} className="rounded-xl bg-white/5 border border-white/10 p-4 flex flex-col gap-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="text-lg font-semibold text-white">{data.ticker}</div>
+                          <div className="text-[11px] text-white/60">{info.label || data.market}</div>
+                        </div>
+                        <div className="text-right text-[11px] text-white/60">{info.currency || ''}</div>
                       </div>
-                      <div className="text-right text-[11px] text-white/60">{MARKETS[data.market]?.currency || ''}</div>
-                    </div>
                     <div className="flex items-center gap-2">
                       <span className="text-2xl font-semibold tabular-nums">{safeNumber(computed.score, 0)}</span>
                       <div className="flex-1"><ScoreBar value={computed.score || 0} label={`Score ${data.ticker}`} /></div>
@@ -1599,7 +1596,7 @@ function App({
                       </div>
                       <div>
                         <div className="text-white/80 font-medium">Liquidez (M)</div>
-                        <div className="tabular-nums">{safeNumber(data.liqM, 1)} {MARKETS[data.market]?.currency || ''}</div>
+                        <div className="tabular-nums">{safeNumber(data.liqM, 1)} {info.currency || ''}</div>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1">
@@ -1615,10 +1612,11 @@ function App({
                       <Badge ok={computed.flags.rot3} label="Rot≥3x" />
                       <Badge ok={computed.flags.shortOK} label="Short%" />
                       <Badge ok={computed.flags.spreadOK} label="Spread" />
-                      <Badge ok={computed.flags.liqOK} label={`Liq ${MARKETS[data.market]?.currency || ''}`} />
+                      <Badge ok={computed.flags.liqOK} label={`Liq ${info.currency || ''}`} />
                     </div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
           </div>
@@ -1639,6 +1637,7 @@ function App({
           fetchError={fetchError}
           stale={staleInfo.isStale}
           staleSeconds={staleInfo.ageSeconds}
+          markets={marketLookup}
         />
 
         {isPreviewOpen ? (
@@ -1885,6 +1884,7 @@ function App({
         row={selectedRow}
         calcResult={selectedCalc}
         dialogId={previewDialogId}
+        markets={marketLookup}
       />
     </>
   );

@@ -1,9 +1,10 @@
 import { DEFAULT_THRESHOLDS } from '../hooks/thresholdConfig.js';
-import { MARKETS } from '../utils/constants.js';
 import { normalizeThresholds } from '../utils/thresholds.js';
+import { getCachedMarkets } from '../services/marketConfig.js';
 import { z } from './zod-lite.js';
 
-const marketKeys = Object.keys(MARKETS);
+const cachedMarkets = getCachedMarkets();
+const marketKeys = Object.keys(cachedMarkets);
 
 const numericMessages = {
   required: 'Requerido',
@@ -137,7 +138,7 @@ const priceRangeSchema = z
     }
   });
 
-const marketKeySchema = z.enum(marketKeys);
+const marketKeySchema = marketKeys.length ? z.union([z.enum(marketKeys), z.string()]) : z.string();
 
 const marketsEnabledSchema = z.record(marketKeySchema, z.boolean());
 const priceRangeRecordSchema = z.record(marketKeySchema, priceRangeSchema);

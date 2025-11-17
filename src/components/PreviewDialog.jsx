@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef } from 'react';
-import { MARKETS } from '../utils/constants.js';
+import { MARKETS as FALLBACK_MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
@@ -7,7 +7,7 @@ import { Badge } from './Badge.jsx';
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
-export const PreviewDialog = ({ open, onClose, row, calcResult, dialogId }) => {
+export const PreviewDialog = ({ open, onClose, row, calcResult, dialogId, markets = FALLBACK_MARKETS }) => {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const titleId = useId();
@@ -78,7 +78,7 @@ export const PreviewDialog = ({ open, onClose, row, calcResult, dialogId }) => {
   }
 
   const market = row.market || 'US';
-  const info = MARKETS[market] || MARKETS.US;
+  const info = markets[market] || markets.US || { label: market, currency: '' };
   const computed = calcResult || {};
   const descriptionText = `${row.ticker || 'Ticker sin nombre'} en ${info.label}`;
 

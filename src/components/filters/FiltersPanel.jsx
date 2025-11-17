@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
-import { COLORS, MARKETS } from '../../utils/constants.js';
+import { COLORS } from '../../utils/constants.js';
 import { parseNumberInput } from '../../utils/forms.js';
+import MarketSelect from '../MarketSelect.jsx';
+import { useMarkets } from '../../hooks/useMarkets.js';
 
 const numberOrEmpty = (value) => (Number.isFinite(value) ? value : '');
 
@@ -14,6 +16,9 @@ export const FiltersPanel = ({ filters }) => {
     updateScalar,
     updateBoolean,
   } = filters;
+
+  const { markets, marketEntries } = useMarkets();
+  const marketLookup = useMemo(() => markets || {}, [markets]);
 
   const volumeInputs = useMemo(
     () => [
@@ -108,27 +113,17 @@ export const FiltersPanel = ({ filters }) => {
       <h2 className="text-xl font-semibold mb-4">Umbrales por mercado</h2>
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
-            <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Mercados</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              {Object.entries(MARKETS).map(([key, info]) => (
-                <label key={key} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-xl">
-                  <span className="font-medium">{info.label}</span>
-                  <input
-                    type="checkbox"
-                    aria-label={`Habilitar mercado ${info.label}`}
-                    checked={!!thresholds.marketsEnabled?.[key]}
-                    onChange={(e) => updateMarket(key, e.target.checked)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
+          <MarketSelect
+            markets={marketLookup}
+            selected={thresholds.marketsEnabled || {}}
+            onToggle={updateMarket}
+            columns={2}
+          />
 
           <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
             <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              {Object.entries(MARKETS).map(([key, info]) => {
+              {marketEntries.map(([key, info = {}]) => {
                 const priceRange = thresholds.priceRange?.[key] || {};
                 const minPath = `priceRange.${key}.min`;
                 const maxPath = `priceRange.${key}.max`;
@@ -225,7 +220,7 @@ export const FiltersPanel = ({ filters }) => {
               <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                 <span className="text-white/80 font-medium">Liquidez mínima (M)</span>
                 <div className="grid grid-cols-2 gap-2 w-full">
-                  {Object.entries(MARKETS).map(([key, info]) => {
+                  {marketEntries.map(([key, info = {}]) => {
                     const liqPath = `liquidityMin.${key}`;
                     return (
                       <div key={key} className="flex flex-col gap-1 text-xs">

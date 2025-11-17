@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState, useId } from 'react';
-import { COLORS, MARKETS } from '../utils/constants.js';
+import { COLORS, MARKETS as FALLBACK_MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 
-const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
+const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate, markets, marketOptions }) => {
   const market = row.market || 'US';
-  const info = MARKETS[market] || MARKETS.US;
+  const info = markets[market] || markets.US || { label: market, currency: '' };
   const { rvol, atrPct, chgPct, rotation, score, flags } = calcResult;
   const stale = !!row.isStale;
   const handleKeyDown = (event) => {
@@ -47,8 +47,8 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
           onChange={(e) => onUpdate(row.id, 'market', e.target.value)}
           aria-label="Mercado"
         >
-          {Object.entries(MARKETS).map(([key, info]) => (
-            <option key={key} value={key}>{info.label}</option>
+          {marketOptions.map(([key, option]) => (
+            <option key={key} value={key}>{option.label}</option>
           ))}
         </select>
       </td>
@@ -144,7 +144,10 @@ export const TickerTable = ({
   fetchError,
   stale,
   staleSeconds,
+  markets = FALLBACK_MARKETS,
 }) => {
+  const marketLookup = useMemo(() => markets || FALLBACK_MARKETS, [markets]);
+  const marketOptions = useMemo(() => Object.entries(marketLookup), [marketLookup]);
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(() => rows.map((row) => ({ row, calcResult: calc(row, row.market || 'US') })), [rows, calc]);
   const titleId = useId();
@@ -253,6 +256,8 @@ export const TickerTable = ({
                 isSelected={selectedId === row.id}
                 onSelect={onSelect}
                 onUpdate={onUpdate}
+                markets={marketLookup}
+                marketOptions={marketOptions}
               />
             ))}
           </tbody>
