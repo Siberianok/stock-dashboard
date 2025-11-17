@@ -16,6 +16,12 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
   const info = MARKETS[market] || MARKETS.US;
   const { rvol, atrPct, chgPct, rotation, score, flags } = calcResult;
   const stale = !!row.isStale;
+
+  const handleMarketChange = (event) => {
+    const nextMarket = normalizeMarketKey(event.target.value);
+    onUpdate(row.id, 'market', nextMarket);
+  };
+
   const handleKeyDown = (event) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === 'Enter' || event.key === ' ') {
