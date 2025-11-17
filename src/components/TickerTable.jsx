@@ -5,11 +5,25 @@ import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 
-const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
-  const market = row.market || 'US';
-  const info = MARKETS[market] || MARKETS.US;
+const DEFAULT_MARKET = 'US';
+const UNKNOWN_OPTION_VALUE = 'UNKNOWN';
+
+const normalizeMarketKey = (marketKey) => (marketKey && MARKETS[marketKey] ? marketKey : DEFAULT_MARKET);
+
+export const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
+  const rawMarket = row.market;
+  const isKnownMarket = rawMarket ? !!MARKETS[rawMarket] : true;
+  const normalizedMarket = isKnownMarket ? rawMarket || DEFAULT_MARKET : DEFAULT_MARKET;
+  const selectValue = isKnownMarket ? normalizedMarket : UNKNOWN_OPTION_VALUE;
+  const info = MARKETS[normalizedMarket] || MARKETS[DEFAULT_MARKET];
   const { rvol, atrPct, chgPct, rotation, score, flags } = calcResult;
   const stale = !!row.isStale;
+
+  const handleMarketChange = (event) => {
+    const nextMarket = normalizeMarketKey(event.target.value);
+    onUpdate(row.id, 'market', nextMarket);
+  };
+
   const handleKeyDown = (event) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === 'Enter' || event.key === ' ') {
@@ -43,13 +57,15 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
       <td className="px-3 py-2 w-28">
         <select
           className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-sm"
-          value={row.market || 'US'}
-          onChange={(e) => onUpdate(row.id, 'market', e.target.value)}
+          value={selectValue}
+          onChange={handleMarketChange}
+          disabled={stale}
           aria-label="Mercado"
         >
           {Object.entries(MARKETS).map(([key, info]) => (
             <option key={key} value={key}>{info.label}</option>
           ))}
+          {isKnownMarket ? null : <option value={UNKNOWN_OPTION_VALUE}>Desconocido</option>}
         </select>
       </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.open)}</td>
