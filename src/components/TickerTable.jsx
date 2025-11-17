@@ -5,6 +5,12 @@ import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 
+const controlBaseClasses =
+  'h-9 rounded border border-white/20 bg-white/10 text-white text-sm px-3 transition ' +
+  'hover:border-cyan-300/70 hover:shadow-[0_0_0_1px_rgba(34,211,238,0.35)] ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-0 ' +
+  'focus-visible:shadow-[0_0_0_4px_rgba(56,189,248,0.25)]';
+
 const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
   const market = row.market || 'US';
   const info = MARKETS[market] || MARKETS.US;
@@ -32,7 +38,7 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
     >
       <td className="px-3 py-2 w-32">
         <input
-          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-sm"
+          className={`${controlBaseClasses} w-full`}
           value={row.ticker || ''}
           onChange={(e) => onUpdate(row.id, 'ticker', e.target.value.toUpperCase())}
           placeholder="Ticker"
@@ -42,14 +48,17 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
       </td>
       <td className="px-3 py-2 w-28">
         <select
-          className="w-full border border-white/20 bg-white/10 text-white rounded px-2 py-1 text-sm"
+          className={`${controlBaseClasses} w-full pr-8`}
           value={row.market || 'US'}
           onChange={(e) => onUpdate(row.id, 'market', e.target.value)}
           aria-label="Mercado"
         >
-          {Object.entries(MARKETS).map(([key, info]) => (
-            <option key={key} value={key}>{info.label}</option>
-          ))}
+          {Object.entries(MARKETS).map(([key, info]) => {
+            const optionLabel = info.flag ? `${info.flag} ${info.label}` : info.label;
+            return (
+              <option key={key} value={key}>{optionLabel}</option>
+            );
+          })}
         </select>
       </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.open)}</td>
@@ -266,7 +275,7 @@ export const TickerTable = ({
           <label className="flex items-center gap-1">
             <span>Filas por página</span>
             <select
-              className="border border-white/20 bg-white/10 text-white rounded px-2 py-1"
+              className={`${controlBaseClasses} w-24 pr-8`}
               value={pageSize}
               onChange={(e) => {
                 const next = Number(e.target.value);
