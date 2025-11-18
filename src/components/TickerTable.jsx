@@ -97,12 +97,34 @@ const MarketSelector = ({
   onToggleFavoriteFilter,
   onChange,
 }) => {
+  const containerRef = useRef(null);
+  const [isCompact, setIsCompact] = useState(false);
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
   const groups = getMarketGroups();
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
   const chipRefs = useRef([]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setIsCompact(entry.contentRect.width < 520);
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (isCompact && viewMode !== MARKET_VIEW_MODES.DROPDOWN) {
+      onViewModeChange(MARKET_VIEW_MODES.DROPDOWN);
+    }
+  }, [isCompact, onViewModeChange, viewMode]);
 
   const handleArrowNav = useCallback(
     (event, index) => {
@@ -127,26 +149,28 @@ const MarketSelector = ({
         return (
           <div key={group.region} className="space-y-1">
             <div className="text-[10px] uppercase tracking-wide text-white/60">{group.label}</div>
-            <div className="flex flex-wrap gap-2">
-              {markets.map((key) => {
-                const idx = visibleMarkets.indexOf(key);
-                return (
-                  <MarketChip
-                    key={key}
-                    marketKey={key}
-                    isSelected={normalized === key}
-                    disabled={disabled}
-                    onSelect={onChange}
-                    onToggleFavorite={onToggleFavorite}
-                    isFavorite={isMarketFavorite(favorites, key)}
-                    onArrowNav={handleArrowNav}
-                    index={idx}
-                    focusRef={(element) => {
-                      chipRefs.current[idx] = element;
-                    }}
-                  />
-                );
-              })}
+            <div className="market-chip-scroller" aria-label={`Mercados de ${group.label}`}>
+              <div className="market-chip-row">
+                {markets.map((key) => {
+                  const idx = visibleMarkets.indexOf(key);
+                  return (
+                    <MarketChip
+                      key={key}
+                      marketKey={key}
+                      isSelected={normalized === key}
+                      disabled={disabled}
+                      onSelect={onChange}
+                      onToggleFavorite={onToggleFavorite}
+                      isFavorite={isMarketFavorite(favorites, key)}
+                      onArrowNav={handleArrowNav}
+                      index={idx}
+                      focusRef={(element) => {
+                        chipRefs.current[idx] = element;
+                      }}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </div>
         );
@@ -159,7 +183,7 @@ const MarketSelector = ({
 
   const renderDropdown = () => (
     <select
-      className={`${controlBaseClasses} w-full pr-8`}
+      className={`${controlBaseClasses} w-full pr-8 market-dropdown`}
       value={normalized}
       onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
       aria-label="Mercado"
@@ -183,20 +207,26 @@ const MarketSelector = ({
   );
 
   return (
-    <div className="market-selector-cell">
-      <div className="flex items-center justify-between gap-2 mb-2">
+    <div className="market-selector-cell" ref={containerRef}>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 text-[11px] text-white/70">
           <span className="inline-flex items-center gap-1">
             <span aria-hidden="true">⚡</span> Vista {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'compacta' : 'expandida'}
           </span>
-          <button
-            type="button"
-            className="market-view-toggle"
-            onClick={() => onViewModeChange(viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN)}
-            aria-label="Alternar vista del selector de mercado"
-          >
-            {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
-          </button>
+          {!isCompact ? (
+            <button
+              type="button"
+              className="market-view-toggle"
+              onClick={() =>
+                onViewModeChange(
+                  viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN,
+                )
+              }
+              aria-label="Alternar vista del selector de mercado"
+            >
+              {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
+            </button>
+          ) : null}
         </div>
         <label className="flex items-center gap-1 text-[11px] text-white/80">
           <input
@@ -208,7 +238,7 @@ const MarketSelector = ({
           <span>Solo favoritos</span>
         </label>
       </div>
-      {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
+      {(isCompact || viewMode === MARKET_VIEW_MODES.DROPDOWN) ? renderDropdown() : renderChips()}
       {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
     </div>
   );
