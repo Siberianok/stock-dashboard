@@ -132,7 +132,9 @@ export const getMarketGroups = () => {
 export const getMarketTooltip = (marketKey) => {
   const info = MARKETS[marketKey];
   if (!info) return '';
-  const parts = [info.label];
+  const parts = [];
+  if (info.flag) parts.push(info.flag);
+  if (info.label) parts.push(info.label);
   if (info.currency) parts.push(info.currency);
   if (info.session) parts.push(`Horario: ${info.session}`);
   if (info.timezone) parts.push(`Zona: ${info.timezone}`);
