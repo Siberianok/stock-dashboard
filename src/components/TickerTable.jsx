@@ -98,7 +98,38 @@ const MarketSelector = ({
   onChange,
 }) => {
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
-  const groups = getMarketGroups();
+  const [searchTerm, setSearchTerm] = useState('');
+  const groups = useMemo(() => getMarketGroups(), []);
+  const filterTerm = searchTerm.trim().toLowerCase();
+
+  const filteredGroups = useMemo(() => {
+    return groups
+      .map((group) => {
+        const filteredMarkets = group.markets.filter((key) => {
+          const info = MARKETS[key];
+          if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return false;
+          if (!filterTerm) return true;
+          const searchable = `${info.label} ${info.currency} ${info.flag || ''}`.toLowerCase();
+          return searchable.includes(filterTerm);
+        });
+        const favoritesFirst = [];
+        const nonFavorites = [];
+        filteredMarkets.forEach((key) => {
+          if (isMarketFavorite(favorites, key)) {
+            favoritesFirst.push(key);
+          } else {
+            nonFavorites.push(key);
+          }
+        });
+        return { ...group, markets: [...favoritesFirst, ...nonFavorites] };
+      })
+      .filter((group) => group.markets.length > 0);
+  }, [favorites, favoriteOnly, filterTerm, groups]);
+
+  const totalDropdownResults = useMemo(
+    () => filteredGroups.reduce((sum, group) => sum + group.markets.length, 0),
+    [filteredGroups],
+  );
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
@@ -158,28 +189,47 @@ const MarketSelector = ({
   );
 
   const renderDropdown = () => (
-    <select
-      className={`${controlBaseClasses} w-full pr-8`}
-      value={normalized}
-      onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
-      aria-label="Mercado"
-      disabled={disabled}
-    >
-      {groups.map((group) => (
-        <optgroup key={group.region} label={group.label}>
-          {group.markets.map((key) => {
-            const info = MARKETS[key];
-            if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
-            const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
-            return (
-              <option key={key} value={key} title={getMarketTooltip(key)}>
-                {optionLabel}
-              </option>
-            );
-          })}
-        </optgroup>
-      ))}
-    </select>
+    <div className="space-y-2">
+      <input
+        type="search"
+        className={`${controlBaseClasses} w-full`}
+        placeholder="Buscar mercado"
+        aria-label="Buscar mercado"
+        value={searchTerm}
+        onChange={(event) => setSearchTerm(event.target.value)}
+        disabled={disabled}
+      />
+      {totalDropdownResults ? (
+        <select
+          className={`${controlBaseClasses} w-full pr-8`}
+          value={normalized}
+          onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
+          aria-label="Mercado"
+          disabled={disabled}
+        >
+          {filteredGroups.map((group) => (
+            <optgroup key={group.region} label={group.label}>
+              {group.markets.map((key) => {
+                const info = MARKETS[key];
+                const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
+                return (
+                  <option key={key} value={key} title={getMarketTooltip(key)}>
+                    {optionLabel}
+                  </option>
+                );
+              })}
+            </optgroup>
+          ))}
+        </select>
+      ) : (
+        <div className="px-3 py-2 rounded border border-white/20 bg-white/5 text-[11px] text-white/70">
+          Sin coincidencias.
+        </div>
+      )}
+      <div className="text-[11px] text-white/70 text-right">
+        {totalDropdownResults} resultado{totalDropdownResults === 1 ? '' : 's'}
+      </div>
+    </div>
   );
 
   return (
