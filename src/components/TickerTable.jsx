@@ -86,7 +86,7 @@ const MarketChip = ({
           event.stopPropagation();
           onToggleFavorite(marketKey);
         }}
-        title={isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
+        title={`${isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'} · ${info.label} · ${info.currency}`}
       >
         ★
       </span>
