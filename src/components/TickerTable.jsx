@@ -37,6 +37,15 @@ const MarketChip = ({
   focusRef,
 }) => {
   const info = MARKETS[marketKey] || MARKETS.UNKNOWN;
+  const classes = [
+    'market-chip',
+    isSelected ? 'market-chip--active' : '',
+    disabled ? 'market-chip--disabled' : '',
+    isFavorite ? 'market-chip--favorite' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div
       ref={focusRef}
@@ -60,7 +69,7 @@ const MarketChip = ({
           onSelect(marketKey);
         }
       }}
-      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
+      className={classes}
       title={getMarketTooltip(marketKey)}
       data-market-key={marketKey}
     >
@@ -78,7 +87,7 @@ const MarketChip = ({
           event.stopPropagation();
           onToggleFavorite(marketKey);
         }}
-        title={isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
+        title={`${isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'} · ${info.label} · ${info.currency}`}
       >
         ★
       </span>
