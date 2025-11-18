@@ -2,8 +2,9 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { vi, describe, expect, it } from 'vitest';
-import { TableRow } from '../TickerTable.jsx';
-import { MARKET_VIEW_MODES } from '../../utils/markets.js';
+import { TableRow, TickerTable } from '../TickerTable.jsx';
+import { DEFAULT_MARKET, MARKET_VIEW_MODES } from '../../utils/markets.js';
+import { DEFAULT_THRESHOLDS } from '../../hooks/thresholdConfig.js';
 
 const baseCalcResult = {
   rvol: 1,
@@ -111,5 +112,58 @@ describe('TableRow market selector', () => {
     );
 
     expect(screen.getByLabelText('Mercado')).toBeDisabled();
+  });
+
+  it('restores the default market when clicking the reset control', () => {
+    const onUpdate = vi.fn();
+
+    render(
+      <table>
+        <tbody>
+          <TableRow
+            row={buildRow({ market: 'BR' })}
+            calcResult={baseCalcResult}
+            isSelected={false}
+            onSelect={() => {}}
+            onUpdate={onUpdate}
+            selectorViewMode={MARKET_VIEW_MODES.DROPDOWN}
+            favoriteMarkets={new Set(['US', 'UNKNOWN'])}
+            favoriteOnly={false}
+            onToggleFavoriteFilter={() => {}}
+          />
+        </tbody>
+      </table>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Restablecer/ }));
+    expect(onUpdate).toHaveBeenLastCalledWith('row-1', 'market', DEFAULT_MARKET);
+  });
+
+  it('focuses the market selector with Ctrl+M to open the dropdown view', async () => {
+    const onUpdate = vi.fn();
+    window.localStorage.setItem('selector.marketViewMode.v1', 'dropdown');
+
+    render(
+      <TickerTable
+        rows={[buildRow({ id: 'row-shortcut', market: 'AR' })]}
+        thresholds={DEFAULT_THRESHOLDS}
+        selectedId="row-shortcut"
+        onSelect={() => {}}
+        onUpdate={onUpdate}
+        onAddRow={() => {}}
+        onClearRows={() => {}}
+        onSortByScore={() => {}}
+        onExport={() => {}}
+        lastUpdatedLabel="ahora"
+        loading={false}
+        fetchError={null}
+        stale={false}
+        staleSeconds={0}
+      />,
+    );
+
+    const selector = await screen.findByLabelText('Mercado');
+    fireEvent.keyDown(window, { key: 'm', ctrlKey: true });
+    expect(selector).toHaveFocus();
   });
 });

@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 import {
+  DEFAULT_MARKET,
   MARKET_VIEW_MODES,
   getMarketGroups,
   getMarketTooltip,
@@ -86,7 +87,7 @@ const MarketChip = ({
   );
 };
 
-const MarketSelector = ({
+const MarketSelector = forwardRef(({ 
   value,
   disabled,
   viewMode,
@@ -96,13 +97,15 @@ const MarketSelector = ({
   favoriteOnly,
   onToggleFavoriteFilter,
   onChange,
-}) => {
+}, ref) => {
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
   const groups = getMarketGroups();
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
   const chipRefs = useRef([]);
+  const selectRef = useRef(null);
+  const activeChipIndex = visibleMarkets.indexOf(normalized);
 
   const handleArrowNav = useCallback(
     (event, index) => {
@@ -117,6 +120,37 @@ const MarketSelector = ({
       }
     },
     [visibleMarkets.length],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusActiveControl: () => {
+        if (viewMode === MARKET_VIEW_MODES.DROPDOWN) {
+          if (selectRef.current) {
+            selectRef.current.focus();
+            if (typeof selectRef.current.showPicker === 'function') {
+              selectRef.current.showPicker();
+            } else {
+              selectRef.current.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            }
+          }
+          return;
+        }
+        if (!visibleMarkets.length) return;
+        const fallbackChip = visibleMarkets[0];
+        const targetChip =
+          activeChipIndex !== -1 ? chipRefs.current[activeChipIndex] : chipRefs.current[visibleMarkets.indexOf(fallbackChip)];
+        if (targetChip) {
+          targetChip.focus();
+          targetChip.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      },
+      resetToDefault: () => {
+        onChange(DEFAULT_MARKET);
+      },
+    }),
+    [activeChipIndex, onChange, viewMode, visibleMarkets],
   );
 
   const renderChips = () => (
@@ -159,6 +193,7 @@ const MarketSelector = ({
 
   const renderDropdown = () => (
     <select
+      ref={selectRef}
       className={`${controlBaseClasses} w-full pr-8`}
       value={normalized}
       onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
@@ -197,6 +232,15 @@ const MarketSelector = ({
           >
             {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
           </button>
+          <button
+            type="button"
+            className="market-view-toggle"
+            onClick={() => onChange(DEFAULT_MARKET)}
+            disabled={disabled}
+            aria-label="Restablecer mercado por defecto"
+          >
+            Restablecer
+          </button>
         </div>
         <label className="flex items-center gap-1 text-[11px] text-white/80">
           <input
@@ -212,7 +256,7 @@ const MarketSelector = ({
       {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
     </div>
   );
-};
+});
 
 const TableRow = ({
   row,
@@ -226,6 +270,7 @@ const TableRow = ({
   onToggleFavorite,
   favoriteOnly,
   onToggleFavoriteFilter,
+  onRegisterSelectorApi,
 }) => {
   const market = normalizeMarketKey(row.market, { allowUnknown: true });
   const info = MARKETS[market] || MARKETS.UNKNOWN;
@@ -236,6 +281,7 @@ const TableRow = ({
   const handleModeChange = onSelectorModeChange || (() => {});
   const handleToggleFavorite = onToggleFavorite || (() => {});
   const handleFavoriteFilter = onToggleFavoriteFilter || (() => {});
+  const selectorRef = useRef(null);
 
   const handleKeyDown = (event) => {
     if (event.target !== event.currentTarget) return;
@@ -245,6 +291,12 @@ const TableRow = ({
     }
   };
   const rowLabel = row.ticker ? `Fila ${row.ticker}` : 'Fila sin ticker';
+
+  useEffect(() => {
+    if (!onRegisterSelectorApi) return undefined;
+    onRegisterSelectorApi(row.id, selectorRef.current);
+    return () => onRegisterSelectorApi(row.id, null);
+  }, [onRegisterSelectorApi, row.id]);
 
   return (
     <tr
@@ -269,6 +321,7 @@ const TableRow = ({
       </td>
       <td className="px-3 py-2 min-w-[220px]">
         <MarketSelector
+          ref={selectorRef}
           value={market}
           disabled={stale}
           viewMode={viewMode}
@@ -386,6 +439,7 @@ export const TickerTable = ({
   const [selectorViewMode, setSelectorViewMode] = useState(readMarketViewMode);
   const [favoriteMarkets, setFavoriteMarkets] = useState(readFavoriteMarkets);
   const [favoriteOnly, setFavoriteOnly] = useState(readMarketFilterPreference);
+  const selectorApis = useRef(new Map());
 
   const totalRows = computedRows.length;
   const maxPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -410,6 +464,21 @@ export const TickerTable = ({
   );
 
   useEffect(() => {
+    const handleShortcut = (event) => {
+      if (event.defaultPrevented) return;
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        const targetId = selectedId || paginatedRows[0]?.row.id;
+        if (!targetId) return;
+        const api = selectorApis.current.get(targetId);
+        api?.focusActiveControl?.();
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [paginatedRows, selectedId]);
+
+  useEffect(() => {
     persistMarketViewMode(selectorViewMode);
   }, [selectorViewMode]);
 
@@ -420,6 +489,15 @@ export const TickerTable = ({
   useEffect(() => {
     persistMarketFilterPreference(favoriteOnly);
   }, [favoriteOnly]);
+
+  const handleRegisterSelectorApi = useCallback((rowId, api) => {
+    if (!rowId) return;
+    if (api) {
+      selectorApis.current.set(rowId, api);
+    } else {
+      selectorApis.current.delete(rowId);
+    }
+  }, []);
 
   const handleSelectorModeChange = useCallback((mode) => {
     setSelectorViewMode(mode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.DROPDOWN : MARKET_VIEW_MODES.CHIPS);
@@ -538,6 +616,7 @@ export const TickerTable = ({
                 onToggleFavorite={handleToggleFavorite}
                 favoriteOnly={favoriteOnly}
                 onToggleFavoriteFilter={handleFavoriteFilter}
+                onRegisterSelectorApi={handleRegisterSelectorApi}
               />
             ))}
           </tbody>
