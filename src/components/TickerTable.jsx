@@ -107,7 +107,38 @@ const MarketSelector = ({
   marketsLoading,
 }) => {
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
-  const groups = getMarketGroups();
+  const [searchTerm, setSearchTerm] = useState('');
+  const groups = useMemo(() => getMarketGroups(), []);
+  const filterTerm = searchTerm.trim().toLowerCase();
+
+  const filteredGroups = useMemo(() => {
+    return groups
+      .map((group) => {
+        const filteredMarkets = group.markets.filter((key) => {
+          const info = MARKETS[key];
+          if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return false;
+          if (!filterTerm) return true;
+          const searchable = `${info.label} ${info.currency} ${info.flag || ''}`.toLowerCase();
+          return searchable.includes(filterTerm);
+        });
+        const favoritesFirst = [];
+        const nonFavorites = [];
+        filteredMarkets.forEach((key) => {
+          if (isMarketFavorite(favorites, key)) {
+            favoritesFirst.push(key);
+          } else {
+            nonFavorites.push(key);
+          }
+        });
+        return { ...group, markets: [...favoritesFirst, ...nonFavorites] };
+      })
+      .filter((group) => group.markets.length > 0);
+  }, [favorites, favoriteOnly, filterTerm, groups]);
+
+  const totalDropdownResults = useMemo(
+    () => filteredGroups.reduce((sum, group) => sum + group.markets.length, 0),
+    [filteredGroups],
+  );
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
