@@ -45,7 +45,7 @@ const MarketChip = ({
       ref={focusRef}
       role="radio"
       aria-checked={isSelected}
-      aria-label={`${info.label} · ${info.currency}`}
+      aria-label={tooltip}
       aria-disabled={disabled}
       tabIndex={computedTabIndex}
       onClick={() => {
@@ -69,7 +69,7 @@ const MarketChip = ({
         }
       }}
       className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
-      title={getMarketTooltip(marketKey)}
+      title={tooltip}
       data-market-key={marketKey}
     >
       <span className="text-lg" aria-hidden="true">{info.flag}</span>
@@ -249,9 +249,9 @@ const MarketSelector = ({
           {group.markets.map((key) => {
             const info = MARKETS[key];
             if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
-            const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
+            const optionLabel = getMarketTooltip(key);
             return (
-              <option key={key} value={key} title={getMarketTooltip(key)}>
+              <option key={key} value={key} title={optionLabel}>
                 {optionLabel}
               </option>
             );
