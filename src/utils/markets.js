@@ -1,6 +1,6 @@
 import { MARKETS } from './constants.js';
 
-const DEFAULT_MARKET = 'US';
+export const DEFAULT_MARKET = 'US';
 const STORAGE_KEYS = {
   LAST: 'selector.lastMarket.v1',
   FAVORITES: 'selector.favoriteMarkets.v1',
