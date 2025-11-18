@@ -104,6 +104,7 @@ const MarketSelector = ({
   favoriteOnly,
   onToggleFavoriteFilter,
   onChange,
+  marketsLoading,
 }) => {
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
   const groups = getMarketGroups();
@@ -181,14 +182,27 @@ const MarketSelector = ({
                 );
               })}
             </div>
+          );
+        })}
+        {!visibleMarkets.length ? (
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/70">
+            <div className="text-lg" aria-hidden="true">⭑</div>
+            <div className="flex-1">
+              <div className="text-xs font-semibold text-white">No hay favoritos visibles</div>
+              <div className="text-[11px] text-white/60">Agregá mercados a favoritos o desactivá el filtro para ver todos.</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15"
+              onClick={() => onToggleFavoriteFilter(false)}
+            >
+              Mostrar todos
+            </button>
           </div>
-        );
-      })}
-      {!visibleMarkets.length ? (
-        <div className="text-[11px] text-amber-200">No hay mercados favoritos seleccionados.</div>
-      ) : null}
-    </div>
-  );
+        ) : null}
+      </div>
+    );
+  };
 
   const renderDropdown = () => (
     <select
@@ -217,7 +231,7 @@ const MarketSelector = ({
   );
 
   return (
-    <div className="market-selector-cell">
+    <div className="market-selector-cell" aria-busy={isLoading}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 text-[11px] text-white/70">
           <span className="inline-flex items-center gap-1">
@@ -228,6 +242,7 @@ const MarketSelector = ({
             className="market-view-toggle"
             onClick={() => onViewModeChange(viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN)}
             aria-label="Alternar vista del selector de mercado"
+            disabled={isLoading}
           >
             {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
           </button>
@@ -238,6 +253,7 @@ const MarketSelector = ({
             className="accent-cyan-400"
             checked={favoriteOnly}
             onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
+            disabled={isLoading}
           />
           <span>Solo favoritos</span>
         </label>
@@ -269,6 +285,7 @@ const TableRow = ({
   onToggleFavorite,
   favoriteOnly,
   onToggleFavoriteFilter,
+  marketsLoading,
 }) => {
   const market = normalizeMarketKey(row.market, { allowUnknown: true });
   const info = MARKETS[market] || MARKETS.UNKNOWN;
@@ -321,6 +338,7 @@ const TableRow = ({
           favoriteOnly={favoriteOnly}
           onToggleFavoriteFilter={handleFavoriteFilter}
           onChange={(next) => onUpdate(row.id, 'market', normalizeMarketKey(next))}
+          marketsLoading={marketsLoading}
         />
       </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.open)}</td>
@@ -415,6 +433,7 @@ export const TickerTable = ({
   fetchError,
   stale,
   staleSeconds,
+  marketsLoading = false,
 }) => {
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(
@@ -581,6 +600,7 @@ export const TickerTable = ({
                 onToggleFavorite={handleToggleFavorite}
                 favoriteOnly={favoriteOnly}
                 onToggleFavoriteFilter={handleFavoriteFilter}
+                marketsLoading={marketsLoading}
               />
             ))}
           </tbody>
