@@ -35,8 +35,11 @@ const MarketChip = ({
   onArrowNav,
   index,
   focusRef,
+  tabIndexValue,
+  onFocusChip,
 }) => {
   const info = MARKETS[marketKey] || MARKETS.UNKNOWN;
+  const computedTabIndex = typeof tabIndexValue === 'number' ? tabIndexValue : disabled ? -1 : 0;
   return (
     <div
       ref={focusRef}
@@ -44,7 +47,7 @@ const MarketChip = ({
       aria-checked={isSelected}
       aria-label={`${info.label} · ${info.currency}`}
       aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
+      tabIndex={computedTabIndex}
       onClick={() => {
         if (disabled) return;
         onSelect(marketKey);
@@ -58,6 +61,11 @@ const MarketChip = ({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(marketKey);
+        }
+      }}
+      onFocus={() => {
+        if (typeof onFocusChip === 'function') {
+          onFocusChip(index);
         }
       }}
       className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
@@ -104,66 +112,75 @@ const MarketSelector = ({
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
   const chipRefs = useRef([]);
-  const isLoading = !!marketsLoading;
+  const [chipFocusIndex, setChipFocusIndex] = useState(0);
+  const cacheLockMessageId = useId();
+  const favoriteOnlyMessageId = useId();
+
+  useEffect(() => {
+    chipRefs.current = [];
+    if (disabled) {
+      setChipFocusIndex(-1);
+      return;
+    }
+    if (!visibleMarkets.length) {
+      setChipFocusIndex(-1);
+      return;
+    }
+    const selectedIndex = visibleMarkets.indexOf(normalized);
+    setChipFocusIndex(selectedIndex >= 0 ? selectedIndex : 0);
+  }, [visibleMarkets, normalized, disabled]);
 
   const handleArrowNav = useCallback(
     (event, index) => {
       if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
       if (!visibleMarkets.length) return;
+      if (disabled) return;
       event.preventDefault();
       const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
       const nextIndex = (index + delta + visibleMarkets.length) % visibleMarkets.length;
+      setChipFocusIndex(nextIndex);
       const nextButton = chipRefs.current[nextIndex];
       if (nextButton) {
         nextButton.focus();
       }
     },
-    [visibleMarkets.length],
+    [visibleMarkets.length, disabled],
   );
 
-  const renderChips = () => {
-    if (isLoading) {
-      return (
-        <div className="space-y-2" role="status" aria-live="polite">
-          <div className="h-3 w-24 rounded bg-white/10 animate-pulse" />
-          <div className="flex flex-wrap gap-2">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="h-9 w-28 rounded-lg bg-white/10 animate-pulse" />
-            ))}
-          </div>
-        </div>
-      );
-    }
+  const describedByIds = [favoriteOnly ? favoriteOnlyMessageId : null, disabled ? cacheLockMessageId : null]
+    .filter(Boolean)
+    .join(' ');
 
-    return (
-      <div className="space-y-2" role="radiogroup" aria-label="Mercado">
-        {groups.map((group) => {
-          const markets = group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key)));
-          if (!markets.length) return null;
-          return (
-            <div key={group.region} className="space-y-1">
-              <div className="text-[10px] uppercase tracking-wide text-white/60">{group.label}</div>
-              <div className="flex flex-wrap gap-2">
-                {markets.map((key) => {
-                  const idx = visibleMarkets.indexOf(key);
-                  return (
-                    <MarketChip
-                      key={key}
-                      marketKey={key}
-                      isSelected={normalized === key}
-                      disabled={disabled}
-                      onSelect={onChange}
-                      onToggleFavorite={onToggleFavorite}
-                      isFavorite={isMarketFavorite(favorites, key)}
-                      onArrowNav={handleArrowNav}
-                      index={idx}
-                      focusRef={(element) => {
-                        chipRefs.current[idx] = element;
-                      }}
-                    />
-                  );
-                })}
-              </div>
+  const renderChips = () => (
+    <div className="space-y-2" role="radiogroup" aria-label="Mercado" aria-describedby={describedByIds || undefined}>
+      {groups.map((group) => {
+        const markets = group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key)));
+        if (!markets.length) return null;
+        return (
+          <div key={group.region} className="space-y-1">
+            <div className="text-[10px] uppercase tracking-wide text-white/60">{group.label}</div>
+            <div className="flex flex-wrap gap-2">
+              {markets.map((key) => {
+                const idx = visibleMarkets.indexOf(key);
+                return (
+                  <MarketChip
+                    key={key}
+                    marketKey={key}
+                    isSelected={normalized === key}
+                    disabled={disabled}
+                    onSelect={onChange}
+                    onToggleFavorite={onToggleFavorite}
+                    isFavorite={isMarketFavorite(favorites, key)}
+                    onArrowNav={handleArrowNav}
+                    index={idx}
+                    focusRef={(element) => {
+                      chipRefs.current[idx] = element;
+                    }}
+                    tabIndexValue={disabled ? -1 : idx === chipFocusIndex ? 0 : -1}
+                    onFocusChip={setChipFocusIndex}
+                  />
+                );
+              })}
             </div>
           );
         })}
@@ -188,37 +205,29 @@ const MarketSelector = ({
   };
 
   const renderDropdown = () => (
-    <>
-      {isLoading ? (
-        <div className="space-y-2" aria-busy="true" aria-live="polite">
-          <div className="h-9 rounded bg-white/10 animate-pulse" />
-          <div className="h-3 w-28 rounded bg-white/10 animate-pulse" />
-        </div>
-      ) : (
-        <select
-          className={`${controlBaseClasses} w-full pr-8`}
-          value={normalized}
-          onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
-          aria-label="Mercado"
-          disabled={disabled}
-        >
-          {groups.map((group) => (
-            <optgroup key={group.region} label={group.label}>
-              {group.markets.map((key) => {
-                const info = MARKETS[key];
-                if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
-                const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
-                return (
-                  <option key={key} value={key} title={getMarketTooltip(key)}>
-                    {optionLabel}
-                  </option>
-                );
-              })}
-            </optgroup>
-          ))}
-        </select>
-      )}
-    </>
+    <select
+      className={`${controlBaseClasses} market-selector__select w-full pr-8`}
+      value={normalized}
+      onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
+      aria-label="Mercado"
+      disabled={disabled}
+      aria-describedby={describedByIds || undefined}
+    >
+      {groups.map((group) => (
+        <optgroup key={group.region} label={group.label}>
+          {group.markets.map((key) => {
+            const info = MARKETS[key];
+            if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
+            const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
+            return (
+              <option key={key} value={key} title={getMarketTooltip(key)}>
+                {optionLabel}
+              </option>
+            );
+          })}
+        </optgroup>
+      ))}
+    </select>
   );
 
   return (
@@ -250,7 +259,16 @@ const MarketSelector = ({
         </label>
       </div>
       {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
-      {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
+      {favoriteOnly ? (
+        <div id={favoriteOnlyMessageId} className="text-[10px] text-white/70 mt-1">
+          Solo favoritos activado. Se muestran únicamente los mercados marcados como favoritos.
+        </div>
+      ) : null}
+      {disabled ? (
+        <div id={cacheLockMessageId} className="text-[10px] text-amber-300 mt-1">
+          Selector bloqueado por datos en caché.
+        </div>
+      ) : null}
     </div>
   );
 };
