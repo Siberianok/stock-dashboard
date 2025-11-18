@@ -96,6 +96,7 @@ const MarketSelector = ({
   favoriteOnly,
   onToggleFavoriteFilter,
   onChange,
+  onFeedback,
 }) => {
   const normalized = normalizeMarketKey(value, { allowUnknown: true });
   const groups = getMarketGroups();
@@ -192,7 +193,11 @@ const MarketSelector = ({
           <button
             type="button"
             className="market-view-toggle"
-            onClick={() => onViewModeChange(viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN)}
+            onClick={() => {
+              const nextMode =
+                viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN;
+              onViewModeChange(nextMode);
+            }}
             aria-label="Alternar vista del selector de mercado"
           >
             {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
@@ -203,12 +208,20 @@ const MarketSelector = ({
             type="checkbox"
             className="accent-cyan-400"
             checked={favoriteOnly}
-            onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
+            onChange={(event) => {
+              const { checked } = event.target;
+              onToggleFavoriteFilter(checked);
+              if (checked && onFeedback) {
+                onFeedback('Filtro "Solo favoritos" activado');
+              }
+            }}
           />
           <span>Solo favoritos</span>
         </label>
       </div>
-      {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
+      <div key={viewMode} className="market-selector-viewport" data-mode={viewMode}>
+        {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
+      </div>
       {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
     </div>
   );
@@ -226,6 +239,7 @@ const TableRow = ({
   onToggleFavorite,
   favoriteOnly,
   onToggleFavoriteFilter,
+  onFeedback,
 }) => {
   const market = normalizeMarketKey(row.market, { allowUnknown: true });
   const info = MARKETS[market] || MARKETS.UNKNOWN;
@@ -277,6 +291,7 @@ const TableRow = ({
           onToggleFavorite={(key) => handleToggleFavorite(key)}
           favoriteOnly={favoriteOnly}
           onToggleFavoriteFilter={handleFavoriteFilter}
+          onFeedback={onFeedback}
           onChange={(next) => onUpdate(row.id, 'market', normalizeMarketKey(next))}
         />
       </td>
@@ -386,6 +401,8 @@ export const TickerTable = ({
   const [selectorViewMode, setSelectorViewMode] = useState(readMarketViewMode);
   const [favoriteMarkets, setFavoriteMarkets] = useState(readFavoriteMarkets);
   const [favoriteOnly, setFavoriteOnly] = useState(readMarketFilterPreference);
+  const [selectorFeedback, setSelectorFeedback] = useState('');
+  const feedbackTimeoutRef = useRef(null);
 
   const totalRows = computedRows.length;
   const maxPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -421,9 +438,29 @@ export const TickerTable = ({
     persistMarketFilterPreference(favoriteOnly);
   }, [favoriteOnly]);
 
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const showSelectorFeedback = useCallback((message) => {
+    if (!message) return;
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+    }
+    setSelectorFeedback(message);
+    feedbackTimeoutRef.current = setTimeout(() => setSelectorFeedback(''), 2200);
+  }, []);
+
   const handleSelectorModeChange = useCallback((mode) => {
     setSelectorViewMode(mode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.DROPDOWN : MARKET_VIEW_MODES.CHIPS);
-  }, []);
+    showSelectorFeedback(
+      mode === MARKET_VIEW_MODES.DROPDOWN ? 'Preferencia guardada: vista compacta' : 'Preferencia guardada: vista con chips',
+    );
+  }, [showSelectorFeedback]);
 
   const handleToggleFavorite = useCallback((marketKey) => {
     setFavoriteMarkets((prev) => {
@@ -538,15 +575,21 @@ export const TickerTable = ({
                 onToggleFavorite={handleToggleFavorite}
                 favoriteOnly={favoriteOnly}
                 onToggleFavoriteFilter={handleFavoriteFilter}
+                onFeedback={showSelectorFeedback}
               />
             ))}
-          </tbody>
-        </table>
+        </tbody>
+      </table>
+    </div>
+    {selectorFeedback ? (
+      <div className="px-4 py-2" aria-live="polite" role="status">
+        <div className="selector-feedback">{selectorFeedback}</div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-white/10 text-xs text-white/70">
-        <div>
-          Mostrando {startLabel}-{endLabel} de {totalRows}
-        </div>
+    ) : null}
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-white/10 text-xs text-white/70">
+      <div>
+        Mostrando {startLabel}-{endLabel} de {totalRows}
+      </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1">
             <span>Filas por página</span>
