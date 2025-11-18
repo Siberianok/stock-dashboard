@@ -5,9 +5,13 @@ import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 import {
+  DEFAULT_MARKET_KEY,
   MARKET_VIEW_MODES,
+  describeMarketAvailability,
   getMarketGroups,
+  getMarketAvailability,
   getMarketTooltip,
+  isMarketAvailable,
   isMarketFavorite,
   normalizeMarketKey,
   persistFavoriteMarkets,
@@ -29,6 +33,7 @@ const MarketChip = ({
   marketKey,
   isSelected,
   disabled,
+  availability,
   onSelect,
   onToggleFavorite,
   isFavorite,
@@ -37,16 +42,24 @@ const MarketChip = ({
   focusRef,
 }) => {
   const info = MARKETS[marketKey] || MARKETS.UNKNOWN;
+  const availabilityInfo = availability || { status: 'available', message: null };
+  const isUnavailable = availabilityInfo.status !== 'available';
+  const blocked = disabled || isUnavailable;
+  const availabilityTitle = describeMarketAvailability(marketKey);
+  const optionTitle = availabilityTitle
+    ? `${getMarketTooltip(marketKey)} · ${availabilityTitle}`
+    : getMarketTooltip(marketKey);
+  const statusLabel = availabilityTitle || '';
   return (
     <div
       ref={focusRef}
       role="radio"
       aria-checked={isSelected}
-      aria-label={`${info.label} · ${info.currency}`}
-      aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
+      aria-label={`${info.label} · ${info.currency}${availabilityTitle ? ` · ${availabilityTitle}` : ''}`}
+      aria-disabled={blocked}
+      tabIndex={blocked ? -1 : 0}
       onClick={() => {
-        if (disabled) return;
+        if (blocked) return;
         onSelect(marketKey);
       }}
       onKeyDown={(event) => {
@@ -54,21 +67,31 @@ const MarketChip = ({
           onArrowNav(event, index);
           return;
         }
-        if (disabled) return;
+        if (blocked) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(marketKey);
         }
       }}
-      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
-      title={getMarketTooltip(marketKey)}
+      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${blocked ? 'market-chip--disabled' : ''}`}
+      title={optionTitle}
       data-market-key={marketKey}
     >
       <span className="text-lg" aria-hidden="true">{info.flag}</span>
       <div className="flex flex-col text-left leading-tight">
         <span className="text-xs font-semibold">{info.label}</span>
         <span className="text-[10px] text-white/70">{info.currency} · {info.session || info.note}</span>
+        {statusLabel ? <span className="market-chip__hint">{statusLabel}</span> : null}
       </div>
+      {statusLabel ? (
+        <span className={`market-chip__status market-chip__status--${availabilityInfo.status || 'unknown'}`} aria-hidden="true">
+          {availabilityInfo.status === 'latency'
+            ? 'Latencia'
+            : availabilityInfo.status === 'permission'
+              ? 'Permisos'
+              : 'Revisar'}
+        </span>
+      ) : null}
       <span
         role="button"
         tabIndex={-1}
@@ -97,12 +120,23 @@ const MarketSelector = ({
   onToggleFavoriteFilter,
   onChange,
 }) => {
-  const normalized = normalizeMarketKey(value, { allowUnknown: true });
+  const [unknownNotice, setUnknownNotice] = useState(null);
+  const normalized = normalizeMarketKey(value, {
+    allowUnknown: true,
+    onUnknown: ({ message, fallback }) => setUnknownNotice({ message, fallback }),
+  });
+  const normalizedAvailability = getMarketAvailability(normalized);
   const groups = getMarketGroups();
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
   const chipRefs = useRef([]);
+
+  useEffect(() => {
+    if (normalized !== 'UNKNOWN') {
+      setUnknownNotice(null);
+    }
+  }, [normalized]);
 
   const handleArrowNav = useCallback(
     (event, index) => {
@@ -130,12 +164,15 @@ const MarketSelector = ({
             <div className="flex flex-wrap gap-2">
               {markets.map((key) => {
                 const idx = visibleMarkets.indexOf(key);
+                const availability = getMarketAvailability(key);
+                const blocked = disabled || !isMarketAvailable(key);
                 return (
                   <MarketChip
                     key={key}
                     marketKey={key}
                     isSelected={normalized === key}
-                    disabled={disabled}
+                    disabled={blocked}
+                    availability={availability}
                     onSelect={onChange}
                     onToggleFavorite={onToggleFavorite}
                     isFavorite={isMarketFavorite(favorites, key)}
@@ -170,10 +207,21 @@ const MarketSelector = ({
           {group.markets.map((key) => {
             const info = MARKETS[key];
             if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
+            const optionDisabled = disabled || !isMarketAvailable(key);
+            const availabilityLabel = describeMarketAvailability(key);
             const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
+            const decoratedLabel = availabilityLabel ? `${optionLabel} · ${availabilityLabel}` : optionLabel;
+            const optionTitle = availabilityLabel
+              ? `${getMarketTooltip(key)} · ${availabilityLabel}`
+              : getMarketTooltip(key);
             return (
-              <option key={key} value={key} title={getMarketTooltip(key)}>
-                {optionLabel}
+              <option
+                key={key}
+                value={key}
+                title={optionTitle}
+                disabled={optionDisabled}
+              >
+                {decoratedLabel}
               </option>
             );
           })}
@@ -209,6 +257,29 @@ const MarketSelector = ({
         </label>
       </div>
       {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
+      {unknownNotice ? (
+        <div className="market-selector__notice market-selector__notice--warn" role="alert">
+          <div className="market-selector__notice-text">
+            <div className="font-semibold text-amber-200">Mercado desconocido</div>
+            <div className="text-[11px] leading-snug">{unknownNotice.message}</div>
+          </div>
+          <button
+            type="button"
+            className="market-selector__action"
+            onClick={() => onChange(normalizeMarketKey(unknownNotice.fallback || DEFAULT_MARKET_KEY))}
+          >
+            Corregir a {unknownNotice.fallback || DEFAULT_MARKET_KEY}
+          </button>
+        </div>
+      ) : null}
+      {normalizedAvailability.status !== 'available' ? (
+        <div className="market-selector__notice market-selector__notice--muted" role="status">
+          <div className="market-selector__notice-text">
+            <div className="font-semibold text-white/80">Mercado no disponible</div>
+            <div className="text-[11px] leading-snug">{describeMarketAvailability(normalized)}</div>
+          </div>
+        </div>
+      ) : null}
       {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
     </div>
   );
