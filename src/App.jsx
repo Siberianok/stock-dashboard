@@ -27,6 +27,7 @@ import { DashboardStatsSection } from './components/DashboardStatsSection.jsx';
 import { useRadarChartData } from './hooks/useRadarChartData.js';
 import { parseNumberInput } from './utils/forms.js';
 import { DATA_MODES, persistDataMode, readStoredDataMode } from './utils/dataMode.js';
+import { readLastSelectedMarket } from './utils/markets.js';
 
 const TIME_RANGE_OPTIONS = [
   { key: '1D', label: '24h' },
@@ -50,10 +51,15 @@ const ROWS_STORAGE_KEY = 'selector.rows.v1';
 const SELECTED_ROW_STORAGE_KEY = 'selector.selectedRowId.v1';
 const isBrowser = typeof window !== 'undefined';
 
+const getInitialMarket = () => {
+  if (!isBrowser) return 'US';
+  return readLastSelectedMarket();
+};
+
 const createRow = (overrides = {}) => ({
   id: uid(),
   ticker: '',
-  market: 'US',
+  market: getInitialMarket(),
   open: undefined,
   close: undefined,
   bid: undefined,
