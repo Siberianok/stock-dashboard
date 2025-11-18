@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
 import {
-  DEFAULT_MARKET_KEY,
+  DEFAULT_MARKET,
   MARKET_VIEW_MODES,
   describeMarketAvailability,
   getMarketGroups,
@@ -40,24 +40,19 @@ const MarketChip = ({
   onArrowNav,
   index,
   focusRef,
+  tabIndexValue,
+  onFocusChip,
 }) => {
   const info = MARKETS[marketKey] || MARKETS.UNKNOWN;
-  const availabilityInfo = availability || { status: 'available', message: null };
-  const isUnavailable = availabilityInfo.status !== 'available';
-  const blocked = disabled || isUnavailable;
-  const availabilityTitle = describeMarketAvailability(marketKey);
-  const optionTitle = availabilityTitle
-    ? `${getMarketTooltip(marketKey)} · ${availabilityTitle}`
-    : getMarketTooltip(marketKey);
-  const statusLabel = availabilityTitle || '';
+  const computedTabIndex = typeof tabIndexValue === 'number' ? tabIndexValue : disabled ? -1 : 0;
   return (
     <div
       ref={focusRef}
       role="radio"
       aria-checked={isSelected}
-      aria-label={`${info.label} · ${info.currency}${availabilityTitle ? ` · ${availabilityTitle}` : ''}`}
-      aria-disabled={blocked}
-      tabIndex={blocked ? -1 : 0}
+      aria-label={tooltip}
+      aria-disabled={disabled}
+      tabIndex={computedTabIndex}
       onClick={() => {
         if (blocked) return;
         onSelect(marketKey);
@@ -73,8 +68,13 @@ const MarketChip = ({
           onSelect(marketKey);
         }
       }}
-      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${blocked ? 'market-chip--disabled' : ''}`}
-      title={optionTitle}
+      onFocus={() => {
+        if (typeof onFocusChip === 'function') {
+          onFocusChip(index);
+        }
+      }}
+      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
+      title={tooltip}
       data-market-key={marketKey}
     >
       <span className="text-lg" aria-hidden="true">{info.flag}</span>
@@ -101,7 +101,7 @@ const MarketChip = ({
           event.stopPropagation();
           onToggleFavorite(marketKey);
         }}
-        title={isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
+        title={`${isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'} · ${info.label} · ${info.currency}`}
       >
         ★
       </span>
@@ -109,7 +109,7 @@ const MarketChip = ({
   );
 };
 
-const MarketSelector = ({
+const MarketSelector = forwardRef(({ 
   value,
   disabled,
   viewMode,
@@ -119,18 +119,62 @@ const MarketSelector = ({
   favoriteOnly,
   onToggleFavoriteFilter,
   onChange,
+  marketsLoading,
 }) => {
-  const [unknownNotice, setUnknownNotice] = useState(null);
-  const normalized = normalizeMarketKey(value, {
-    allowUnknown: true,
-    onUnknown: ({ message, fallback }) => setUnknownNotice({ message, fallback }),
-  });
-  const normalizedAvailability = getMarketAvailability(normalized);
-  const groups = getMarketGroups();
+  const normalized = normalizeMarketKey(value, { allowUnknown: true });
+  const [searchTerm, setSearchTerm] = useState('');
+  const groups = useMemo(() => getMarketGroups(), []);
+  const filterTerm = searchTerm.trim().toLowerCase();
+
+  const filteredGroups = useMemo(() => {
+    return groups
+      .map((group) => {
+        const filteredMarkets = group.markets.filter((key) => {
+          const info = MARKETS[key];
+          if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return false;
+          if (!filterTerm) return true;
+          const searchable = `${info.label} ${info.currency} ${info.flag || ''}`.toLowerCase();
+          return searchable.includes(filterTerm);
+        });
+        const favoritesFirst = [];
+        const nonFavorites = [];
+        filteredMarkets.forEach((key) => {
+          if (isMarketFavorite(favorites, key)) {
+            favoritesFirst.push(key);
+          } else {
+            nonFavorites.push(key);
+          }
+        });
+        return { ...group, markets: [...favoritesFirst, ...nonFavorites] };
+      })
+      .filter((group) => group.markets.length > 0);
+  }, [favorites, favoriteOnly, filterTerm, groups]);
+
+  const totalDropdownResults = useMemo(
+    () => filteredGroups.reduce((sum, group) => sum + group.markets.length, 0),
+    [filteredGroups],
+  );
   const visibleMarkets = groups.flatMap((group) =>
     group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
   );
   const chipRefs = useRef([]);
+  const [chipFocusIndex, setChipFocusIndex] = useState(0);
+  const cacheLockMessageId = useId();
+  const favoriteOnlyMessageId = useId();
+
+  useEffect(() => {
+    chipRefs.current = [];
+    if (disabled) {
+      setChipFocusIndex(-1);
+      return;
+    }
+    if (!visibleMarkets.length) {
+      setChipFocusIndex(-1);
+      return;
+    }
+    const selectedIndex = visibleMarkets.indexOf(normalized);
+    setChipFocusIndex(selectedIndex >= 0 ? selectedIndex : 0);
+  }, [visibleMarkets, normalized, disabled]);
 
   useEffect(() => {
     if (normalized !== 'UNKNOWN') {
@@ -142,19 +186,25 @@ const MarketSelector = ({
     (event, index) => {
       if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
       if (!visibleMarkets.length) return;
+      if (disabled) return;
       event.preventDefault();
       const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
       const nextIndex = (index + delta + visibleMarkets.length) % visibleMarkets.length;
+      setChipFocusIndex(nextIndex);
       const nextButton = chipRefs.current[nextIndex];
       if (nextButton) {
         nextButton.focus();
       }
     },
-    [visibleMarkets.length],
+    [visibleMarkets.length, disabled],
   );
 
+  const describedByIds = [favoriteOnly ? favoriteOnlyMessageId : null, disabled ? cacheLockMessageId : null]
+    .filter(Boolean)
+    .join(' ');
+
   const renderChips = () => (
-    <div className="space-y-2" role="radiogroup" aria-label="Mercado">
+    <div className="space-y-2" role="radiogroup" aria-label="Mercado" aria-describedby={describedByIds || undefined}>
       {groups.map((group) => {
         const markets = group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key)));
         if (!markets.length) return null;
@@ -181,47 +231,52 @@ const MarketSelector = ({
                     focusRef={(element) => {
                       chipRefs.current[idx] = element;
                     }}
+                    tabIndexValue={disabled ? -1 : idx === chipFocusIndex ? 0 : -1}
+                    onFocusChip={setChipFocusIndex}
                   />
                 );
               })}
             </div>
+          );
+        })}
+        {!visibleMarkets.length ? (
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/70">
+            <div className="text-lg" aria-hidden="true">⭑</div>
+            <div className="flex-1">
+              <div className="text-xs font-semibold text-white">No hay favoritos visibles</div>
+              <div className="text-[11px] text-white/60">Agregá mercados a favoritos o desactivá el filtro para ver todos.</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15"
+              onClick={() => onToggleFavoriteFilter(false)}
+            >
+              Mostrar todos
+            </button>
           </div>
-        );
-      })}
-      {!visibleMarkets.length ? (
-        <div className="text-[11px] text-amber-200">No hay mercados favoritos seleccionados.</div>
-      ) : null}
-    </div>
-  );
+        ) : null}
+      </div>
+    );
+  };
 
   const renderDropdown = () => (
     <select
-      className={`${controlBaseClasses} w-full pr-8`}
+      className={`${controlBaseClasses} market-selector__select w-full pr-8`}
       value={normalized}
       onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
       aria-label="Mercado"
       disabled={disabled}
+      aria-describedby={describedByIds || undefined}
     >
       {groups.map((group) => (
         <optgroup key={group.region} label={group.label}>
           {group.markets.map((key) => {
             const info = MARKETS[key];
             if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
-            const optionDisabled = disabled || !isMarketAvailable(key);
-            const availabilityLabel = describeMarketAvailability(key);
-            const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
-            const decoratedLabel = availabilityLabel ? `${optionLabel} · ${availabilityLabel}` : optionLabel;
-            const optionTitle = availabilityLabel
-              ? `${getMarketTooltip(key)} · ${availabilityLabel}`
-              : getMarketTooltip(key);
+            const optionLabel = getMarketTooltip(key);
             return (
-              <option
-                key={key}
-                value={key}
-                title={optionTitle}
-                disabled={optionDisabled}
-              >
-                {decoratedLabel}
+              <option key={key} value={key} title={optionLabel}>
+                {optionLabel}
               </option>
             );
           })}
@@ -231,7 +286,7 @@ const MarketSelector = ({
   );
 
   return (
-    <div className="market-selector-cell">
+    <div className="market-selector-cell" aria-busy={isLoading}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 text-[11px] text-white/70">
           <span className="inline-flex items-center gap-1">
@@ -240,10 +295,24 @@ const MarketSelector = ({
           <button
             type="button"
             className="market-view-toggle"
-            onClick={() => onViewModeChange(viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN)}
+            onClick={() => {
+              const nextMode =
+                viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN;
+              onViewModeChange(nextMode);
+            }}
             aria-label="Alternar vista del selector de mercado"
+            disabled={isLoading}
           >
             {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
+          </button>
+          <button
+            type="button"
+            className="market-view-toggle"
+            onClick={() => onChange(DEFAULT_MARKET)}
+            disabled={disabled}
+            aria-label="Restablecer mercado por defecto"
+          >
+            Restablecer
           </button>
         </div>
         <label className="flex items-center gap-1 text-[11px] text-white/80">
@@ -252,38 +321,25 @@ const MarketSelector = ({
             className="accent-cyan-400"
             checked={favoriteOnly}
             onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
+            disabled={isLoading}
           />
           <span>Solo favoritos</span>
         </label>
       </div>
       {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
-      {unknownNotice ? (
-        <div className="market-selector__notice market-selector__notice--warn" role="alert">
-          <div className="market-selector__notice-text">
-            <div className="font-semibold text-amber-200">Mercado desconocido</div>
-            <div className="text-[11px] leading-snug">{unknownNotice.message}</div>
-          </div>
-          <button
-            type="button"
-            className="market-selector__action"
-            onClick={() => onChange(normalizeMarketKey(unknownNotice.fallback || DEFAULT_MARKET_KEY))}
-          >
-            Corregir a {unknownNotice.fallback || DEFAULT_MARKET_KEY}
-          </button>
+      {favoriteOnly ? (
+        <div id={favoriteOnlyMessageId} className="text-[10px] text-white/70 mt-1">
+          Solo favoritos activado. Se muestran únicamente los mercados marcados como favoritos.
         </div>
       ) : null}
-      {normalizedAvailability.status !== 'available' ? (
-        <div className="market-selector__notice market-selector__notice--muted" role="status">
-          <div className="market-selector__notice-text">
-            <div className="font-semibold text-white/80">Mercado no disponible</div>
-            <div className="text-[11px] leading-snug">{describeMarketAvailability(normalized)}</div>
-          </div>
+      {disabled ? (
+        <div id={cacheLockMessageId} className="text-[10px] text-amber-300 mt-1">
+          Selector bloqueado por datos en caché.
         </div>
       ) : null}
-      {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
     </div>
   );
-};
+});
 
 const TableRow = ({
   row,
@@ -297,6 +353,7 @@ const TableRow = ({
   onToggleFavorite,
   favoriteOnly,
   onToggleFavoriteFilter,
+  marketsLoading,
 }) => {
   const market = normalizeMarketKey(row.market, { allowUnknown: true });
   const info = MARKETS[market] || MARKETS.UNKNOWN;
@@ -307,6 +364,7 @@ const TableRow = ({
   const handleModeChange = onSelectorModeChange || (() => {});
   const handleToggleFavorite = onToggleFavorite || (() => {});
   const handleFavoriteFilter = onToggleFavoriteFilter || (() => {});
+  const selectorRef = useRef(null);
 
   const handleKeyDown = (event) => {
     if (event.target !== event.currentTarget) return;
@@ -316,6 +374,12 @@ const TableRow = ({
     }
   };
   const rowLabel = row.ticker ? `Fila ${row.ticker}` : 'Fila sin ticker';
+
+  useEffect(() => {
+    if (!onRegisterSelectorApi) return undefined;
+    onRegisterSelectorApi(row.id, selectorRef.current);
+    return () => onRegisterSelectorApi(row.id, null);
+  }, [onRegisterSelectorApi, row.id]);
 
   return (
     <tr
@@ -340,6 +404,7 @@ const TableRow = ({
       </td>
       <td className="px-3 py-2 min-w-[220px]">
         <MarketSelector
+          ref={selectorRef}
           value={market}
           disabled={stale}
           viewMode={viewMode}
@@ -348,7 +413,9 @@ const TableRow = ({
           onToggleFavorite={(key) => handleToggleFavorite(key)}
           favoriteOnly={favoriteOnly}
           onToggleFavoriteFilter={handleFavoriteFilter}
+          onFeedback={onFeedback}
           onChange={(next) => onUpdate(row.id, 'market', normalizeMarketKey(next))}
+          marketsLoading={marketsLoading}
         />
       </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.open)}</td>
@@ -443,6 +510,7 @@ export const TickerTable = ({
   fetchError,
   stale,
   staleSeconds,
+  marketsLoading = false,
 }) => {
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(
@@ -457,6 +525,8 @@ export const TickerTable = ({
   const [selectorViewMode, setSelectorViewMode] = useState(readMarketViewMode);
   const [favoriteMarkets, setFavoriteMarkets] = useState(readFavoriteMarkets);
   const [favoriteOnly, setFavoriteOnly] = useState(readMarketFilterPreference);
+  const [selectorFeedback, setSelectorFeedback] = useState('');
+  const feedbackTimeoutRef = useRef(null);
 
   const totalRows = computedRows.length;
   const maxPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -481,6 +551,21 @@ export const TickerTable = ({
   );
 
   useEffect(() => {
+    const handleShortcut = (event) => {
+      if (event.defaultPrevented) return;
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        const targetId = selectedId || paginatedRows[0]?.row.id;
+        if (!targetId) return;
+        const api = selectorApis.current.get(targetId);
+        api?.focusActiveControl?.();
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [paginatedRows, selectedId]);
+
+  useEffect(() => {
     persistMarketViewMode(selectorViewMode);
   }, [selectorViewMode]);
 
@@ -492,9 +577,29 @@ export const TickerTable = ({
     persistMarketFilterPreference(favoriteOnly);
   }, [favoriteOnly]);
 
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const showSelectorFeedback = useCallback((message) => {
+    if (!message) return;
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+    }
+    setSelectorFeedback(message);
+    feedbackTimeoutRef.current = setTimeout(() => setSelectorFeedback(''), 2200);
+  }, []);
+
   const handleSelectorModeChange = useCallback((mode) => {
     setSelectorViewMode(mode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.DROPDOWN : MARKET_VIEW_MODES.CHIPS);
-  }, []);
+    showSelectorFeedback(
+      mode === MARKET_VIEW_MODES.DROPDOWN ? 'Preferencia guardada: vista compacta' : 'Preferencia guardada: vista con chips',
+    );
+  }, [showSelectorFeedback]);
 
   const handleToggleFavorite = useCallback((marketKey) => {
     setFavoriteMarkets((prev) => {
@@ -609,15 +714,21 @@ export const TickerTable = ({
                 onToggleFavorite={handleToggleFavorite}
                 favoriteOnly={favoriteOnly}
                 onToggleFavoriteFilter={handleFavoriteFilter}
+                marketsLoading={marketsLoading}
               />
             ))}
-          </tbody>
-        </table>
+        </tbody>
+      </table>
+    </div>
+    {selectorFeedback ? (
+      <div className="px-4 py-2" aria-live="polite" role="status">
+        <div className="selector-feedback">{selectorFeedback}</div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-white/10 text-xs text-white/70">
-        <div>
-          Mostrando {startLabel}-{endLabel} de {totalRows}
-        </div>
+    ) : null}
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-white/10 text-xs text-white/70">
+      <div>
+        Mostrando {startLabel}-{endLabel} de {totalRows}
+      </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1">
             <span>Filas por página</span>

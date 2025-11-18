@@ -1,6 +1,6 @@
 import { MARKETS } from './constants.js';
 
-export const DEFAULT_MARKET_KEY = 'US';
+export const DEFAULT_MARKET = 'US';
 const STORAGE_KEYS = {
   LAST: 'selector.lastMarket.v1',
   FAVORITES: 'selector.favoriteMarkets.v1',
@@ -177,8 +177,8 @@ export const describeMarketAvailability = (marketKey) => {
 export const getMarketTooltip = (marketKey) => {
   const info = MARKETS[marketKey];
   if (!info) return '';
-  const parts = [info.label];
-  if (info.currency) parts.push(info.currency);
+  const labelWithCurrency = info.currency ? `${info.label} · ${info.currency}` : info.label;
+  const parts = [labelWithCurrency];
   if (info.session) parts.push(`Horario: ${info.session}`);
   if (info.timezone) parts.push(`Zona: ${info.timezone}`);
   return parts.join(' · ');

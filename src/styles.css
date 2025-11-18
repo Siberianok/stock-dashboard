@@ -409,34 +409,54 @@ a {
   box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.25);
 }
 
+.market-selector-viewport {
+  position: relative;
+  animation: selectorFadeSlide 160ms ease;
+}
+
+@keyframes selectorFadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .market-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   padding: 0.45rem 0.65rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(125, 211, 252, 0.35);
   color: #e2e8f0;
-  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
 
 .market-chip:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: rgba(14, 165, 233, 0.14);
-  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.15);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.18), rgba(6, 182, 212, 0.14));
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.18);
 }
 
 .market-chip:focus-visible {
   outline: 2px solid #38bdf8;
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25), 0 12px 28px rgba(14, 165, 233, 0.18);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.18), rgba(14, 165, 233, 0.08));
+  border-color: rgba(14, 165, 233, 0.45);
 }
 
 .market-chip--active {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(59, 130, 246, 0.28));
-  border-color: rgba(56, 189, 248, 0.6);
-  box-shadow: 0 12px 30px rgba(56, 189, 248, 0.35);
+  background: var(--gradient-primary);
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 14px 32px rgba(56, 189, 248, 0.35);
+  color: var(--color-text-primary);
 }
 
 .market-chip--disabled {
@@ -444,26 +464,40 @@ a {
   cursor: not-allowed;
 }
 
+.market-chip--favorite {
+  border-color: rgba(251, 191, 36, 0.6);
+  box-shadow: 0 10px 26px rgba(251, 191, 36, 0.22);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(255, 255, 255, 0.02));
+}
+
 .market-chip__fav {
   margin-left: auto;
   padding: 0.15rem 0.3rem;
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid transparent;
-  color: rgba(252, 211, 77, 0.6);
-  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: rgba(251, 191, 36, 0.55);
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .market-chip__fav:hover {
   color: #fbbf24;
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.6);
+  background: rgba(251, 191, 36, 0.12);
+  box-shadow: 0 8px 18px rgba(251, 191, 36, 0.2);
 }
 
 .market-chip__fav--on {
   color: #fbbf24;
-  border-color: rgba(251, 191, 36, 0.55);
-  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.85);
+  background: rgba(251, 191, 36, 0.18);
+}
+
+.market-selector__select:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.28);
+  border-color: rgba(56, 189, 248, 0.55);
 }
 
 .market-chip__status {
@@ -1069,6 +1103,31 @@ a {
 
 .link:hover {
   text-decoration: underline;
+}
+
+.selector-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.9rem;
+  background: rgba(34, 211, 238, 0.16);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  color: #e0f2fe;
+  font-size: 0.88rem;
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.18);
+  animation: selectorToast 200ms ease;
+}
+
+@keyframes selectorToast {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 768px) {
