@@ -146,7 +146,10 @@ export const TickerTable = ({
   staleSeconds,
   markets = FALLBACK_MARKETS,
 }) => {
-  const marketLookup = useMemo(() => markets || FALLBACK_MARKETS, [markets]);
+  const marketLookup = useMemo(() => {
+    if (markets && Object.keys(markets || {}).length) return markets;
+    return FALLBACK_MARKETS;
+  }, [markets]);
   const marketOptions = useMemo(() => Object.entries(marketLookup), [marketLookup]);
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
   const computedRows = useMemo(() => rows.map((row) => ({ row, calcResult: calc(row, row.market || 'US') })), [rows, calc]);

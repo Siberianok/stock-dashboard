@@ -1,10 +1,6 @@
 import { DEFAULT_THRESHOLDS } from '../hooks/thresholdConfig.js';
 import { normalizeThresholds } from '../utils/thresholds.js';
-import { getCachedMarkets } from '../services/marketConfig.js';
 import { z } from './zod-lite.js';
-
-const cachedMarkets = getCachedMarkets();
-const marketKeys = Object.keys(cachedMarkets);
 
 const numericMessages = {
   required: 'Requerido',
@@ -22,6 +18,18 @@ const numberField = ({ min, max, messageMin, messageMax } = {}) => {
     schema = schema.max(max, messageMax || `Debe ser ≤ ${max}`);
   }
   return schema;
+};
+
+const recordWithStringKeys = (valueSchema) => z.record(z.string(), valueSchema);
+
+const collectMarketKeys = (data) => {
+  const buckets = [data?.priceRange, data?.liquidityMin, data?.marketsEnabled];
+  const keys = new Set();
+  buckets.forEach((bucket) => {
+    if (!bucket || typeof bucket !== 'object') return;
+    Object.keys(bucket).forEach((key) => keys.add(key));
+  });
+  return Array.from(keys);
 };
 
 const scalarFieldConstraints = {
@@ -138,11 +146,9 @@ const priceRangeSchema = z
     }
   });
 
-const marketKeySchema = marketKeys.length ? z.union([z.enum(marketKeys), z.string()]) : z.string();
-
-const marketsEnabledSchema = z.record(marketKeySchema, z.boolean());
-const priceRangeRecordSchema = z.record(marketKeySchema, priceRangeSchema);
-const liquiditySchema = z.record(marketKeySchema, numberField({ min: 0, messageMin: numericMessages.minZero }));
+const marketsEnabledSchema = recordWithStringKeys(z.boolean());
+const priceRangeRecordSchema = recordWithStringKeys(priceRangeSchema);
+const liquiditySchema = recordWithStringKeys(numberField({ min: 0, messageMin: numericMessages.minZero }));
 
 export const filterThresholdSchema = z
   .object({
@@ -165,7 +171,7 @@ export const filterThresholdSchema = z
     if (typeof data.rotationIdeal === 'number' && typeof data.rotationMin === 'number' && data.rotationIdeal < data.rotationMin) {
       ctx.addIssue({ path: ['rotationIdeal'], message: `Debe ser ≥ ${data.rotationMin}` });
     }
-    marketKeys.forEach((market) => {
+    collectMarketKeys(data).forEach((market) => {
       const range = data.priceRange?.[market];
       if (!range) return;
       if (typeof range.min === 'number' && typeof range.max === 'number' && range.min > range.max) {

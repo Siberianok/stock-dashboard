@@ -17,8 +17,27 @@ export const FiltersPanel = ({ filters }) => {
     updateBoolean,
   } = filters;
 
-  const { markets, marketEntries } = useMarkets();
+  const { markets } = useMarkets();
   const marketLookup = useMemo(() => markets || {}, [markets]);
+
+  const derivedMarketEntries = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(marketLookup),
+      ...Object.keys(thresholds.marketsEnabled || {}),
+      ...Object.keys(thresholds.priceRange || {}),
+      ...Object.keys(thresholds.liquidityMin || {}),
+    ]);
+    return Array.from(keys).map((key) => [key, marketLookup[key] || { label: key, currency: '' }]);
+  }, [marketLookup, thresholds.liquidityMin, thresholds.marketsEnabled, thresholds.priceRange]);
+
+  const resolvedMarkets = useMemo(
+    () =>
+      derivedMarketEntries.reduce((acc, [key, info]) => {
+        acc[key] = info;
+        return acc;
+      }, {}),
+    [derivedMarketEntries],
+  );
 
   const volumeInputs = useMemo(
     () => [
@@ -114,7 +133,7 @@ export const FiltersPanel = ({ filters }) => {
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="space-y-4">
           <MarketSelect
-            markets={marketLookup}
+            markets={resolvedMarkets}
             selected={thresholds.marketsEnabled || {}}
             onToggle={updateMarket}
             columns={2}
@@ -123,7 +142,7 @@ export const FiltersPanel = ({ filters }) => {
           <div className={`rounded-2xl ${COLORS.glass} p-5 shadow-xl`}>
             <h3 className="font-semibold mb-4 text-center text-lg tracking-wide">Precio</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              {marketEntries.map(([key, info = {}]) => {
+              {derivedMarketEntries.map(([key, info = {}]) => {
                 const priceRange = thresholds.priceRange?.[key] || {};
                 const minPath = `priceRange.${key}.min`;
                 const maxPath = `priceRange.${key}.max`;
@@ -220,7 +239,7 @@ export const FiltersPanel = ({ filters }) => {
               <label className="w-full max-w-[18rem] mx-auto flex flex-col items-center gap-2">
                 <span className="text-white/80 font-medium">Liquidez mínima (M)</span>
                 <div className="grid grid-cols-2 gap-2 w-full">
-                  {marketEntries.map(([key, info = {}]) => {
+                  {derivedMarketEntries.map(([key, info = {}]) => {
                     const liqPath = `liquidityMin.${key}`;
                     return (
                       <div key={key} className="flex flex-col gap-1 text-xs">
