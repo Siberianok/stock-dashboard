@@ -1,9 +1,23 @@
-import React, { useEffect, useMemo, useState, useId } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { COLORS, MARKETS } from '../utils/constants.js';
 import { safeNumber, safePct } from '../utils/format.js';
 import { createCalc } from '../utils/calc.js';
 import { ScoreBar } from './ScoreBar.jsx';
 import { Badge } from './Badge.jsx';
+import {
+  MARKET_VIEW_MODES,
+  getMarketGroups,
+  getMarketTooltip,
+  isMarketFavorite,
+  normalizeMarketKey,
+  persistFavoriteMarkets,
+  persistLastSelectedMarket,
+  persistMarketFilterPreference,
+  persistMarketViewMode,
+  readFavoriteMarkets,
+  readMarketFilterPreference,
+  readMarketViewMode,
+} from '../utils/markets.js';
 
 const controlBaseClasses =
   'h-9 rounded border border-white/20 bg-white/10 text-white text-sm px-3 transition ' +
@@ -11,16 +25,217 @@ const controlBaseClasses =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-0 ' +
   'focus-visible:shadow-[0_0_0_4px_rgba(56,189,248,0.25)]';
 
-const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
-  const market = row.market || 'US';
-  const info = MARKETS[market] || MARKETS.US;
+const MarketChip = ({
+  marketKey,
+  isSelected,
+  disabled,
+  onSelect,
+  onToggleFavorite,
+  isFavorite,
+  onArrowNav,
+  index,
+  focusRef,
+}) => {
+  const info = MARKETS[marketKey] || MARKETS.UNKNOWN;
+  return (
+    <div
+      ref={focusRef}
+      role="radio"
+      aria-checked={isSelected}
+      aria-label={`${info.label} · ${info.currency}`}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => {
+        if (disabled) return;
+        onSelect(marketKey);
+      }}
+      onKeyDown={(event) => {
+        if (['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
+          onArrowNav(event, index);
+          return;
+        }
+        if (disabled) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(marketKey);
+        }
+      }}
+      className={`market-chip ${isSelected ? 'market-chip--active' : ''} ${disabled ? 'market-chip--disabled' : ''}`}
+      title={getMarketTooltip(marketKey)}
+      data-market-key={marketKey}
+    >
+      <span className="text-lg" aria-hidden="true">{info.flag}</span>
+      <div className="flex flex-col text-left leading-tight">
+        <span className="text-xs font-semibold">{info.label}</span>
+        <span className="text-[10px] text-white/70">{info.currency} · {info.session || info.note}</span>
+      </div>
+      <span
+        role="button"
+        tabIndex={-1}
+        className={`market-chip__fav ${isFavorite ? 'market-chip__fav--on' : ''}`}
+        aria-label={`${isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'} ${info.label}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleFavorite(marketKey);
+        }}
+        title={isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
+      >
+        ★
+      </span>
+    </div>
+  );
+};
+
+const MarketSelector = ({
+  value,
+  disabled,
+  viewMode,
+  onViewModeChange,
+  favorites,
+  onToggleFavorite,
+  favoriteOnly,
+  onToggleFavoriteFilter,
+  onChange,
+}) => {
+  const normalized = normalizeMarketKey(value, { allowUnknown: true });
+  const groups = getMarketGroups();
+  const visibleMarkets = groups.flatMap((group) =>
+    group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key))),
+  );
+  const chipRefs = useRef([]);
+
+  const handleArrowNav = useCallback(
+    (event, index) => {
+      if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      if (!visibleMarkets.length) return;
+      event.preventDefault();
+      const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = (index + delta + visibleMarkets.length) % visibleMarkets.length;
+      const nextButton = chipRefs.current[nextIndex];
+      if (nextButton) {
+        nextButton.focus();
+      }
+    },
+    [visibleMarkets.length],
+  );
+
+  const renderChips = () => (
+    <div className="space-y-2" role="radiogroup" aria-label="Mercado">
+      {groups.map((group) => {
+        const markets = group.markets.filter((key) => (!favoriteOnly ? true : isMarketFavorite(favorites, key)));
+        if (!markets.length) return null;
+        return (
+          <div key={group.region} className="space-y-1">
+            <div className="text-[10px] uppercase tracking-wide text-white/60">{group.label}</div>
+            <div className="flex flex-wrap gap-2">
+              {markets.map((key) => {
+                const idx = visibleMarkets.indexOf(key);
+                return (
+                  <MarketChip
+                    key={key}
+                    marketKey={key}
+                    isSelected={normalized === key}
+                    disabled={disabled}
+                    onSelect={onChange}
+                    onToggleFavorite={onToggleFavorite}
+                    isFavorite={isMarketFavorite(favorites, key)}
+                    onArrowNav={handleArrowNav}
+                    index={idx}
+                    focusRef={(element) => {
+                      chipRefs.current[idx] = element;
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {!visibleMarkets.length ? (
+        <div className="text-[11px] text-amber-200">No hay mercados favoritos seleccionados.</div>
+      ) : null}
+    </div>
+  );
+
+  const renderDropdown = () => (
+    <select
+      className={`${controlBaseClasses} w-full pr-8`}
+      value={normalized}
+      onChange={(event) => onChange(normalizeMarketKey(event.target.value))}
+      aria-label="Mercado"
+      disabled={disabled}
+    >
+      {groups.map((group) => (
+        <optgroup key={group.region} label={group.label}>
+          {group.markets.map((key) => {
+            const info = MARKETS[key];
+            if (!info || (favoriteOnly && !isMarketFavorite(favorites, key))) return null;
+            const optionLabel = info.flag ? `${info.flag} ${info.label} · ${info.currency}` : info.label;
+            return (
+              <option key={key} value={key} title={getMarketTooltip(key)}>
+                {optionLabel}
+              </option>
+            );
+          })}
+        </optgroup>
+      ))}
+    </select>
+  );
+
+  return (
+    <div className="market-selector-cell">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 text-[11px] text-white/70">
+          <span className="inline-flex items-center gap-1">
+            <span aria-hidden="true">⚡</span> Vista {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'compacta' : 'expandida'}
+          </span>
+          <button
+            type="button"
+            className="market-view-toggle"
+            onClick={() => onViewModeChange(viewMode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.CHIPS : MARKET_VIEW_MODES.DROPDOWN)}
+            aria-label="Alternar vista del selector de mercado"
+          >
+            {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'Chips' : 'Lista'}
+          </button>
+        </div>
+        <label className="flex items-center gap-1 text-[11px] text-white/80">
+          <input
+            type="checkbox"
+            className="accent-cyan-400"
+            checked={favoriteOnly}
+            onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
+          />
+          <span>Solo favoritos</span>
+        </label>
+      </div>
+      {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
+      {disabled ? <div className="text-[10px] text-amber-300 mt-1">Selector bloqueado por datos en caché.</div> : null}
+    </div>
+  );
+};
+
+const TableRow = ({
+  row,
+  calcResult,
+  isSelected,
+  onSelect,
+  onUpdate,
+  selectorViewMode,
+  onSelectorModeChange,
+  favoriteMarkets,
+  onToggleFavorite,
+  favoriteOnly,
+  onToggleFavoriteFilter,
+}) => {
+  const market = normalizeMarketKey(row.market, { allowUnknown: true });
+  const info = MARKETS[market] || MARKETS.UNKNOWN;
   const { rvol, atrPct, chgPct, rotation, score, flags } = calcResult;
   const stale = !!row.isStale;
-
-  const handleMarketChange = (event) => {
-    const nextMarket = normalizeMarketKey(event.target.value);
-    onUpdate(row.id, 'market', nextMarket);
-  };
+  const viewMode = selectorViewMode || MARKET_VIEW_MODES.CHIPS;
+  const safeFavorites = favoriteMarkets || new Set();
+  const handleModeChange = onSelectorModeChange || (() => {});
+  const handleToggleFavorite = onToggleFavorite || (() => {});
+  const handleFavoriteFilter = onToggleFavoriteFilter || (() => {});
 
   const handleKeyDown = (event) => {
     if (event.target !== event.currentTarget) return;
@@ -52,20 +267,18 @@ const TableRow = ({ row, calcResult, isSelected, onSelect, onUpdate }) => {
         />
         {stale ? <div className="text-[10px] text-amber-300 mt-1">Cache</div> : null}
       </td>
-      <td className="px-3 py-2 w-28">
-        <select
-          className={`${controlBaseClasses} w-full pr-8`}
-          value={row.market || 'US'}
-          onChange={(e) => onUpdate(row.id, 'market', e.target.value)}
-          aria-label="Mercado"
-        >
-          {Object.entries(MARKETS).map(([key, info]) => {
-            const optionLabel = info.flag ? `${info.flag} ${info.label}` : info.label;
-            return (
-              <option key={key} value={key}>{optionLabel}</option>
-            );
-          })}
-        </select>
+      <td className="px-3 py-2 min-w-[220px]">
+        <MarketSelector
+          value={market}
+          disabled={stale}
+          viewMode={viewMode}
+          onViewModeChange={handleModeChange}
+          favorites={safeFavorites}
+          onToggleFavorite={(key) => handleToggleFavorite(key)}
+          favoriteOnly={favoriteOnly}
+          onToggleFavoriteFilter={handleFavoriteFilter}
+          onChange={(next) => onUpdate(row.id, 'market', normalizeMarketKey(next))}
+        />
       </td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.open)}</td>
       <td className="px-3 py-2 w-20 text-right tabular-nums">{safeNumber(row.close)}</td>
@@ -161,12 +374,18 @@ export const TickerTable = ({
   staleSeconds,
 }) => {
   const calc = useMemo(() => createCalc(thresholds), [thresholds]);
-  const computedRows = useMemo(() => rows.map((row) => ({ row, calcResult: calc(row, row.market || 'US') })), [rows, calc]);
+  const computedRows = useMemo(
+    () => rows.map((row) => ({ row, calcResult: calc(row, normalizeMarketKey(row.market)) })),
+    [rows, calc],
+  );
   const titleId = useId();
   const statusId = useId();
   const keyboardHelpId = useId();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
+  const [selectorViewMode, setSelectorViewMode] = useState(readMarketViewMode);
+  const [favoriteMarkets, setFavoriteMarkets] = useState(readFavoriteMarkets);
+  const [favoriteOnly, setFavoriteOnly] = useState(readMarketFilterPreference);
 
   const totalRows = computedRows.length;
   const maxPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -188,6 +407,51 @@ export const TickerTable = ({
   const paginatedRows = useMemo(
     () => computedRows.slice(pageStart, pageStart + pageSize),
     [computedRows, pageStart, pageSize],
+  );
+
+  useEffect(() => {
+    persistMarketViewMode(selectorViewMode);
+  }, [selectorViewMode]);
+
+  useEffect(() => {
+    persistFavoriteMarkets(favoriteMarkets);
+  }, [favoriteMarkets]);
+
+  useEffect(() => {
+    persistMarketFilterPreference(favoriteOnly);
+  }, [favoriteOnly]);
+
+  const handleSelectorModeChange = useCallback((mode) => {
+    setSelectorViewMode(mode === MARKET_VIEW_MODES.DROPDOWN ? MARKET_VIEW_MODES.DROPDOWN : MARKET_VIEW_MODES.CHIPS);
+  }, []);
+
+  const handleToggleFavorite = useCallback((marketKey) => {
+    setFavoriteMarkets((prev) => {
+      const next = new Set(prev);
+      if (next.has(marketKey)) {
+        next.delete(marketKey);
+      } else {
+        next.add(marketKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleFavoriteFilter = useCallback((value) => {
+    setFavoriteOnly(value);
+  }, []);
+
+  const handleUpdate = useCallback(
+    (id, key, value) => {
+      if (key === 'market') {
+        const normalized = normalizeMarketKey(value);
+        persistLastSelectedMarket(normalized);
+        onUpdate(id, key, normalized);
+        return;
+      }
+      onUpdate(id, key, value);
+    },
+    [onUpdate],
   );
 
   const pageCount = Math.max(1, Math.ceil(Math.max(totalRows, 1) / pageSize));
@@ -267,7 +531,13 @@ export const TickerTable = ({
                 calcResult={calcResult}
                 isSelected={selectedId === row.id}
                 onSelect={onSelect}
-                onUpdate={onUpdate}
+                onUpdate={handleUpdate}
+                selectorViewMode={selectorViewMode}
+                onSelectorModeChange={handleSelectorModeChange}
+                favoriteMarkets={favoriteMarkets}
+                onToggleFavorite={handleToggleFavorite}
+                favoriteOnly={favoriteOnly}
+                onToggleFavoriteFilter={handleFavoriteFilter}
               />
             ))}
           </tbody>
@@ -321,3 +591,5 @@ export const TickerTable = ({
     </div>
   );
 };
+
+export { TableRow };

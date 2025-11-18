@@ -3,6 +3,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { vi, describe, expect, it } from 'vitest';
 import { TableRow } from '../TickerTable.jsx';
+import { MARKET_VIEW_MODES } from '../../utils/markets.js';
 
 const baseCalcResult = {
   rvol: 1,
@@ -62,14 +63,24 @@ describe('TableRow market selector', () => {
     render(
       <table>
         <tbody>
-          <TableRow row={row} calcResult={baseCalcResult} isSelected={false} onSelect={() => {}} onUpdate={onUpdate} />
+          <TableRow
+            row={row}
+            calcResult={baseCalcResult}
+            isSelected={false}
+            onSelect={() => {}}
+            onUpdate={onUpdate}
+            selectorViewMode={MARKET_VIEW_MODES.DROPDOWN}
+            favoriteMarkets={new Set(['US', 'UNKNOWN'])}
+            favoriteOnly={false}
+            onToggleFavoriteFilter={() => {}}
+          />
         </tbody>
       </table>,
     );
 
     const select = screen.getByLabelText('Mercado');
     expect(select).toHaveValue('UNKNOWN');
-    expect(screen.getByRole('option', { name: 'Desconocido' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Desconocido/ })).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: 'INVALID' } });
     expect(onUpdate).toHaveBeenCalledWith('row-unknown', 'market', 'US');
@@ -84,7 +95,17 @@ describe('TableRow market selector', () => {
     render(
       <table>
         <tbody>
-          <TableRow row={row} calcResult={baseCalcResult} isSelected={false} onSelect={() => {}} onUpdate={() => {}} />
+          <TableRow
+            row={row}
+            calcResult={baseCalcResult}
+            isSelected={false}
+            onSelect={() => {}}
+            onUpdate={() => {}}
+            selectorViewMode={MARKET_VIEW_MODES.DROPDOWN}
+            favoriteMarkets={new Set(['US', 'UNKNOWN'])}
+            favoriteOnly={false}
+            onToggleFavoriteFilter={() => {}}
+          />
         </tbody>
       </table>,
     );

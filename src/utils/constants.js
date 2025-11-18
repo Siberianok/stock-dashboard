@@ -11,11 +11,52 @@ export const COLORS = {
 };
 
 export const MARKETS = {
-  US: { label: 'EEUU', currency: 'USD', flag: '🇺🇸' },
-  AR: { label: 'Argentina', currency: 'ARS', flag: '🇦🇷' },
-  BR: { label: 'Brasil', currency: 'BRL', flag: '🇧🇷' },
-  EU: { label: 'Europa', currency: 'EUR', flag: '🇪🇺' },
-  CN: { label: 'China', currency: 'CNY', flag: '🇨🇳' },
+  US: {
+    label: 'EEUU',
+    currency: 'USD',
+    flag: '🇺🇸',
+    session: '09:30-16:00',
+    timezone: 'ET',
+    note: 'NYSE/Nasdaq',
+  },
+  AR: {
+    label: 'Argentina',
+    currency: 'ARS',
+    flag: '🇦🇷',
+    session: '11:00-17:00',
+    timezone: 'ART',
+    note: 'BYMA',
+  },
+  BR: {
+    label: 'Brasil',
+    currency: 'BRL',
+    flag: '🇧🇷',
+    session: '10:00-18:00',
+    timezone: 'BRT',
+    note: 'B3',
+  },
+  EU: {
+    label: 'Europa',
+    currency: 'EUR',
+    flag: '🇪🇺',
+    session: '09:00-17:30',
+    timezone: 'CET',
+    note: 'Euronext/Xetra',
+  },
+  CN: {
+    label: 'China',
+    currency: 'CNY',
+    flag: '🇨🇳',
+    session: '09:30-16:00',
+    timezone: 'CST',
+    note: 'SSE/SZSE/HK',
+  },
+  UNKNOWN: {
+    label: 'Desconocido',
+    currency: 'N/D',
+    flag: '❓',
+    note: 'No mapeado',
+  },
 };
 
 export const UNIVERSE = {
