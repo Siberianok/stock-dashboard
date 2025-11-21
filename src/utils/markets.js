@@ -16,23 +16,30 @@ const getStorage = () => {
 };
 
 export const normalizeMarketKey = (value, options = {}) => {
-  const { allowUnknown = false } = options;
-  if (!value) return DEFAULT_MARKET;
+  const { allowUnknown = false, onUnknown, silent = false } = options;
+  if (!value) return DEFAULT_MARKET_KEY;
   const key = String(value).trim().toUpperCase();
   if (MARKETS[key]) return key;
-  if (allowUnknown) return 'UNKNOWN';
-  return DEFAULT_MARKET;
+  const fallback = allowUnknown ? 'UNKNOWN' : DEFAULT_MARKET_KEY;
+  const message =
+    "Mercado desconocido. Corrige el código o usa la sugerencia ('" + fallback + "').";
+  if (typeof onUnknown === 'function') {
+    onUnknown({ input: value, fallback, message });
+  } else if (!silent) {
+    console.warn('[markets] ' + message, { input: value, fallback });
+  }
+  return fallback;
 };
 
 export const readLastSelectedMarket = () => {
   const storage = getStorage();
-  if (!storage) return DEFAULT_MARKET;
+  if (!storage) return DEFAULT_MARKET_KEY;
   try {
     const stored = storage.getItem(STORAGE_KEYS.LAST);
     return normalizeMarketKey(stored);
   } catch (error) {
     console.error('[runtime] No se pudo leer el último mercado seleccionado', error);
-    return DEFAULT_MARKET;
+    return DEFAULT_MARKET_KEY;
   }
 };
 
@@ -127,6 +134,44 @@ export const getMarketGroups = () => {
     { label: 'Asia', region: 'APAC', markets: ['CN'] },
     { label: 'Otros', region: 'MISC', markets: ['UNKNOWN'] },
   ];
+};
+
+const MARKET_AVAILABILITY = Object.freeze({
+  CN: {
+    status: 'latency',
+    message: 'Pausado temporalmente por latencia alta del proveedor.',
+  },
+  EU: {
+    status: 'permission',
+    message: 'Requiere permisos adicionales del equipo de datos.',
+  },
+});
+
+const AVAILABILITY_LABELS = Object.freeze({
+  latency: 'Pausado por latencia',
+  permission: 'Restringido por permisos',
+  unknown: 'Mercado desconocido',
+});
+
+export const getMarketAvailability = (marketKey) => {
+  const normalized = normalizeMarketKey(marketKey, { allowUnknown: true, silent: true });
+  if (normalized === 'UNKNOWN') {
+    return { status: 'unknown', message: 'Mercado sin mapear; corrige el código para continuar.' };
+  }
+  const availability = MARKET_AVAILABILITY[normalized];
+  if (!availability) {
+    return { status: 'available', message: null };
+  }
+  return availability;
+};
+
+export const isMarketAvailable = (marketKey) => getMarketAvailability(marketKey).status === 'available';
+
+export const describeMarketAvailability = (marketKey) => {
+  const availability = getMarketAvailability(marketKey);
+  if (availability.status === 'available') return '';
+  const label = AVAILABILITY_LABELS[availability.status] || 'No disponible';
+  return availability.message ? `${label} · ${availability.message}` : label;
 };
 
 export const getMarketTooltip = (marketKey) => {

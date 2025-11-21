@@ -7,8 +7,11 @@ import { Badge } from './Badge.jsx';
 import {
   DEFAULT_MARKET,
   MARKET_VIEW_MODES,
+  describeMarketAvailability,
   getMarketGroups,
+  getMarketAvailability,
   getMarketTooltip,
+  isMarketAvailable,
   isMarketFavorite,
   normalizeMarketKey,
   persistFavoriteMarkets,
@@ -30,6 +33,7 @@ const MarketChip = ({
   marketKey,
   isSelected,
   disabled,
+  availability,
   onSelect,
   onToggleFavorite,
   isFavorite,
@@ -50,7 +54,7 @@ const MarketChip = ({
       aria-disabled={disabled}
       tabIndex={computedTabIndex}
       onClick={() => {
-        if (disabled) return;
+        if (blocked) return;
         onSelect(marketKey);
       }}
       onKeyDown={(event) => {
@@ -58,7 +62,7 @@ const MarketChip = ({
           onArrowNav(event, index);
           return;
         }
-        if (disabled) return;
+        if (blocked) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(marketKey);
@@ -77,7 +81,17 @@ const MarketChip = ({
       <div className="flex flex-col text-left leading-tight">
         <span className="text-xs font-semibold">{info.label}</span>
         <span className="text-[10px] text-white/70">{info.currency} · {info.session || info.note}</span>
+        {statusLabel ? <span className="market-chip__hint">{statusLabel}</span> : null}
       </div>
+      {statusLabel ? (
+        <span className={`market-chip__status market-chip__status--${availabilityInfo.status || 'unknown'}`} aria-hidden="true">
+          {availabilityInfo.status === 'latency'
+            ? 'Latencia'
+            : availabilityInfo.status === 'permission'
+              ? 'Permisos'
+              : 'Revisar'}
+        </span>
+      ) : null}
       <span
         role="button"
         tabIndex={-1}
@@ -162,6 +176,12 @@ const MarketSelector = forwardRef(({
     setChipFocusIndex(selectedIndex >= 0 ? selectedIndex : 0);
   }, [visibleMarkets, normalized, disabled]);
 
+  useEffect(() => {
+    if (normalized !== 'UNKNOWN') {
+      setUnknownNotice(null);
+    }
+  }, [normalized]);
+
   const handleArrowNav = useCallback(
     (event, index) => {
       if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
@@ -194,12 +214,15 @@ const MarketSelector = forwardRef(({
             <div className="flex flex-wrap gap-2">
               {markets.map((key) => {
                 const idx = visibleMarkets.indexOf(key);
+                const availability = getMarketAvailability(key);
+                const blocked = disabled || !isMarketAvailable(key);
                 return (
                   <MarketChip
                     key={key}
                     marketKey={key}
                     isSelected={normalized === key}
-                    disabled={disabled}
+                    disabled={blocked}
+                    availability={availability}
                     onSelect={onChange}
                     onToggleFavorite={onToggleFavorite}
                     isFavorite={isMarketFavorite(favorites, key)}
