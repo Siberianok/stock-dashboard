@@ -264,7 +264,7 @@ const MarketSelector = forwardRef(({
 
   return (
     <div className="market-selector-cell" aria-busy={isLoading}>
-      <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-[11px] text-white/70">
           <span className="inline-flex items-center gap-1">
             <span aria-hidden="true">⚡</span> Vista {viewMode === MARKET_VIEW_MODES.DROPDOWN ? 'compacta' : 'expandida'}
@@ -292,16 +292,40 @@ const MarketSelector = forwardRef(({
             Restablecer
           </button>
         </div>
-        <label className="flex items-center gap-1 text-[11px] text-white/80">
-          <input
-            type="checkbox"
-            className="accent-cyan-400"
-            checked={favoriteOnly}
-            onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
-            disabled={isLoading}
-          />
-          <span>Solo favoritos</span>
-        </label>
+        <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+          <div className="flex items-center gap-2 sm:order-2">
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className={`${controlBaseClasses} w-full sm:w-52`}
+              placeholder="Buscar mercado..."
+              aria-label="Buscar mercado por nombre o divisa"
+              disabled={isLoading}
+            />
+            {searchTerm ? (
+              <button
+                type="button"
+                className="market-view-toggle"
+                onClick={() => setSearchTerm('')}
+                aria-label="Limpiar búsqueda"
+                disabled={isLoading}
+              >
+                Limpiar
+              </button>
+            ) : null}
+          </div>
+          <label className="flex items-center gap-1 text-[11px] text-white/80 sm:order-1 sm:self-start">
+            <input
+              type="checkbox"
+              className="accent-cyan-400"
+              checked={favoriteOnly}
+              onChange={(event) => onToggleFavoriteFilter(event.target.checked)}
+              disabled={isLoading}
+            />
+            <span>Solo favoritos</span>
+          </label>
+        </div>
       </div>
       {viewMode === MARKET_VIEW_MODES.DROPDOWN ? renderDropdown() : renderChips()}
       {favoriteOnly ? (
