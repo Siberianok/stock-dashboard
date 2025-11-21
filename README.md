@@ -40,5 +40,12 @@ npm install
 1. Ejecuta `npm run dev` y abre la URL indicada por Vite.
 2. Para asegurar calidad antes de publicar, pasa `npm run lint` y `npm run test`.
 
+## Despliegue en GitHub Pages
+1. En Settings → Pages, en la sección **Build and deployment**, selecciona **GitHub Actions** para que Pages use el flujo automático.
+2. Los pushes a `main` disparan `.github/workflows/deploy.yml`, que ejecuta `npm ci`, corre `npm run build` y publica `dist/` usando `actions/upload-pages-artifact` + `actions/deploy-pages`.
+3. La acción crea y actualiza automáticamente el entorno `github-pages` (no se necesita configurar una rama `gh-pages`). Si ya usabas `gh-pages`, cambia la opción de Pages a GitHub Actions para que tome el nuevo flujo.
+4. La URL pública debería seguir el formato `https://<usuario>.github.io/stock-dashboard/`; el `base` definido en `vite.config.js` (`/stock-dashboard/`) asegura que los assets carguen desde esa ruta.
+5. Si ves recursos cacheados después de desplegar, fuerza recarga del navegador o usa **Purge cache** en el panel de Pages.
+
 ## Notas sobre datos
 La aplicación intenta usar Yahoo Finance para obtener cotizaciones; si la solicitud falla o expira, cae a un modo simulado y muestra el aviso "Fuente real caída, estás viendo datos simulados". Esto permite seguir explorando el flujo de análisis aun sin conexión estable.
